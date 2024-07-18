@@ -17,7 +17,7 @@ bot = telebot.TeleBot(TG_TOKEN)
 sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(client_id=CLIENT_ID,
                                                            client_secret=CLIENT_SECRET))
 user_state = {}
-user_playlist_id = 0
+info = {}
 db = mysql.connector.connect(
     host='localhost',
     user='root',
@@ -48,7 +48,7 @@ def get_songs_from_db(playlist_id):
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     username = message.from_user.username
-    bot.reply_to(message, f'''Hello {username}! \nUse the command /add_song <playlist_name> - to start adding songs to your playlist. \n/delete_song <playlist_name> - to start deleting songs from your playlist.\n/get_songs <playlist_name>  - to see the list of the songs from your playlist.''')
+    bot.reply_to(message, f'''Hello {username}! It's a bot for creating music quizes. Do not forget to challenge your friends! \nCommands usage: \n/add_song <playlist_name> - to start adding songs to your playlist. \n/delete_song <playlist_name> - to start deleting songs from your playlist.\n/get_songs <playlist_name>  - to see the list of the songs from your playlist.''')
 
 @bot.message_handler(commands=['add_song'])
 def ask_for_song_id(message):
@@ -67,8 +67,7 @@ def ask_for_song_id(message):
             db.commit()
         cursor.execute(f"SELECT id FROM playlists WHERE user_id={message.from_user.id} AND name='{playlist_name}';")
         # cursor.execute("SELECT * FROM users")
-        global user_playlist_id 
-        user_playlist_id = cursor.fetchall()[0]['id']
+        info[message.from_user.id] = cursor.fetchall()[0]['id']
         username = message.from_user.username
         user_state[message.from_user.id] = 'awaiting_song_id'
         bot.reply_to(message, f'{username}, please provide the Spotify song link to add to the playlist {playlist_name}.')
@@ -79,54 +78,60 @@ def ask_for_song_id(message):
 def add_song_to_playlist(message):
     song_id = extract_spotify_track_id(message.text.strip())
     user_id = message.from_user.id
-    print(user_playlist_id)
-    cursor.execute(f"SELECT name FROM playlists WHERE id={user_playlist_id}")
+    playlist_id = info[message.from_user.id]
+    cursor.execute(f"SELECT name FROM playlists WHERE id={info[message.from_user.id]}")
     playlist_name = cursor.fetchone()['name']
     print(playlist_name, song_id)
     preview_url, song_name = get_song_preview_url(song_id)
     if preview_url:
+        user_path = f'songs/{user_id}'
         filepath = f'songs/{user_id}/{playlist_name}'
+        if not os.path.exists(user_path):
+            os.mkdir(user_path)
         if not os.path.exists(filepath):
             os.mkdir(filepath)
         filename = os.path.join(filepath, f'{song_name}.mp3')
         download_preview(preview_url, filename)
-        cursor.execute(f"INSERT INTO songs VALUES('{song_id}', '{song_name}', {user_playlist_id})")
+        cursor.execute(f"INSERT INTO songs VALUES('{song_id}', '{song_name}', {playlist_id})")
         db.commit()
         bot.reply_to(message, f'Song with name {song_name} has been added to playlist {playlist_name}.')
         user_state.pop(message.from_user.id, None)
+        info.pop(message.from_user.id)
     else:
         bot.reply_to(message, 'Preview not available for this track. Please provide a valid Spotify song ID.')
 
-@bot.message_handler(commands=['start'])
-def delete_song_from_playlist(message):
-    username = message.from_user.username
-    bot.reply_to(message, f'Hello {username}! Use the command /add_song <playlist_name> to start adding songs to your playlist.')
 
 @bot.message_handler(commands=['get_songs', 'delete_song'])
 def get_songs(message):
-    playlist_name = message.text.split()[1]
-    user_id = message.from_user.id
-    cursor.execute(f"SELECT id FROM playlists WHERE name='{playlist_name}' AND user_id={user_id}")
-    playlist_id = cursor.fetchone()['id']
-    print(playlist_id)
-    reply = f'Here are the songs from playlist {playlist_name}:\n'
-    global songs
-    songs = get_songs_from_db(playlist_id)
-    for i, song in enumerate(songs):
-        reply += f'{i+1}. ' + song['name'] + "\n"
+    try:
+        playlist_name = message.text.split()[1]
+        user_id = message.from_user.id
+        cursor.execute(f"SELECT id FROM playlists WHERE name='{playlist_name}' AND user_id={user_id}")
+        playlist_id = cursor.fetchone()['id']
+        reply = f'Here are the songs from playlist {playlist_name}:\n'
+        songs = get_songs_from_db(playlist_id)
+        info[user_id] = songs
+        for i, song in enumerate(songs):
+            reply += f'{i+1}. ' + song['name'] + "\n"
 
-    if message.text.split()[0] == '/delete_song':
-        user_state[message.from_user.id] = "awaiting_for_song_idx_del"
-        print(user_state)
-        reply += "Enter an index of the song you want to delete:"
-    bot.reply_to(message, reply)
+        if message.text.split()[0] == '/delete_song':
+            user_state[message.from_user.id] = "awaiting_for_song_idx_del"
+            reply += "Enter an index of the song you want to delete:"
+        bot.reply_to(message, reply)
+    except IndexError:
+        bot.reply_to(message, f'Please provide a playlist name. Usage: {message.text} <playlist_name>')
+    except TypeError:
+        bot.reply_to(message, f"There is no such playlist")
 
 @bot.message_handler(commands=['get_playlists', 'delete_playlist', 'quiz'])
 def get_playlists(message):
     user_id = message.from_user.id
-    cursor.execute(f"SELECT name FROM playlists")
-    global playlists
+    cursor.execute(f"SELECT name FROM playlists WHERE user_id='{user_id}'")
     playlists = cursor.fetchall()
+    if not playlists:
+        bot.reply_to(message, "There are no playlists in your library")
+        return
+    info[user_id] = playlists
     reply = f'Here are your playlists:\n'
     for i, playlist in enumerate(playlists):
         reply += f'{i+1}. ' + playlist['name'] + "\n"
@@ -143,31 +148,38 @@ def get_playlists(message):
 
 @bot.message_handler(func=lambda message: user_state.get(message.from_user.id) == 'awaiting_for_song_idx_del')
 def delete_song(message):
-    song_idx = int(message.text.split()[0])
-    user_id = message.from_user.id
-    song = songs[song_idx - 1]
-    name = song['name']
-    playlist_id = song['playlist_id']
-    cursor.execute(f"SELECT name FROM playlists WHERE id={playlist_id}")
-    playlist_name = cursor.fetchone()['name']
-    cursor.execute(f"DELETE FROM songs WHERE name='{name}' AND playlist_id={playlist_id}")
-    os.remove(f'songs/{user_id}/{playlist_name}/{name}.mp3')
-    db.commit()
-    bot.reply_to(message, f"The song {name} was deleted from playlist.")
-    user_state.pop(user_id)
+    try:
+        song_idx = int(message.text.split()[0])
+        user_id = message.from_user.id
+        song = info[user_id][song_idx - 1]
+        name = song['name']
+        playlist_id = song['playlist_id']
+        cursor.execute(f"SELECT name FROM playlists WHERE id={playlist_id}")
+        playlist_name = cursor.fetchone()['name']
+        cursor.execute(f"DELETE FROM songs WHERE name='{name}' AND playlist_id={playlist_id}")
+        os.remove(f'songs/{user_id}/{playlist_name}/{name}.mp3')
+        db.commit()
+        bot.reply_to(message, f"The song {name} was deleted from playlist.")
+        user_state.pop(user_id)
+        info.pop(user_id)
+    except IndexError:
+        bot.reply_to(message, "Please provide the valid index which is in range.")
 
 
 @bot.message_handler(func=lambda message: user_state.get(message.from_user.id) == 'awaiting_for_playlist_idx_del')
-def delete_song(message):
-    playlist_idx = int(message.text.split()[0])
-    user_id = message.from_user.id
-    playlist = playlists[playlist_idx - 1]
-    name = playlist['name']
-    cursor.execute(f"DELETE FROM playlists WHERE name='{name}' AND user_id={user_id}")
-    shutil.rmtree(f'songs/{user_id}/{name}')
-    db.commit()
-    bot.reply_to(message, f"The playlist {name} was deleted.")
-    user_state.pop(user_id)
+def delete_playlist(message):
+    try:
+        playlist_idx = int(message.text.split()[0])
+        user_id = message.from_user.id
+        playlist = info[user_id][playlist_idx - 1]
+        name = playlist['name']
+        cursor.execute(f"DELETE FROM playlists WHERE name='{name}' AND user_id={user_id}")
+        shutil.rmtree(f'songs/{user_id}/{name}')
+        db.commit()
+        bot.reply_to(message, f"The playlist {name} was deleted.")
+        user_state.pop(user_id)
+    except IndexError:
+        bot.reply_to(message, "Please provide the valid index which is in range.")
 
 @bot.message_handler(func=lambda message: user_state.get(message.from_user.id) == 'awaiting_for_playlist_idx_quiz')
 def start_quiz(message):
