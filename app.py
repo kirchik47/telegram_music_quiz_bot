@@ -2,29 +2,36 @@ import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 import os
 import requests
-import telebot
 import re
-import mysql.connector 
 import shutil
 import random
+from aiogram import Bot, Dispatcher, Router, types, F
+from aiogram.filters import CommandStart, Command
+from aiogram.filters.state import State, StatesGroup
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.types import InlineKeyboardButton, CallbackQuery
+import aiomysql
+import asyncio
+import keyboards as kb
 
 
 CLIENT_ID = os.getenv('CLIENT_ID')
 TG_TOKEN = os.getenv('TG_TOKEN')
 CLIENT_SECRET = os.getenv('CLIENT_SECRET')
 PASSWORD = os.getenv('PASSWORD')
-bot = telebot.TeleBot(TG_TOKEN)
+dp = Dispatcher()
+router_add_song = Router()
+router_add_pl = Router()
+router_delete_song = Router()
+router_delete_playlist = Router()
+router_quiz = Router()
+router_get = Router()
+dp.include_routers(*[router_add_pl, router_add_song, router_delete_song, router_delete_playlist, router_quiz, router_get])
 sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(client_id=CLIENT_ID,
                                                            client_secret=CLIENT_SECRET))
 user_state = {}
 info = {}
-db = mysql.connector.connect(
-    host='localhost',
-    user='root',
-    password=PASSWORD,
-    database='songs'
-)
-cursor = db.cursor(dictionary=True)
+
 def get_song_preview_url(song_id):
     track_info = sp.track(song_id)
     return track_info['preview_url'], track_info['album']['artists'][0]['name'] + " - " + track_info['name']
@@ -34,176 +41,260 @@ def download_preview(url, filename):
     with open(filename, 'wb') as file:
         file.write(response.content)
 
-def extract_spotify_track_id(url):
+async def extract_spotify_track_id(url):
     match = re.search(r'https://open\.spotify\.com/track/([a-zA-Z0-9]+)', url)
     if match:
         return match.group(1)
     else:
         return None
     
-def get_songs_from_db(playlist_id):
-    cursor.execute(f"SELECT * FROM songs WHERE playlist_id={playlist_id}")
-    return cursor.fetchall()
 
-@bot.message_handler(commands=['start'])
-def send_welcome(message):
+class Form(StatesGroup):
+    waiting_for_song_id = State()
+    waiting_for_playlist_name = State()
+    menu = State()
+
+async def inline_lists(lst, ids, param):
+    keyboard = InlineKeyboardBuilder()
+    for i, inst in enumerate(lst):
+        keyboard.button(text=inst[0], callback_data=f'{ids[i][0]} {param}')
+    keyboard = keyboard.adjust(*[1]*len(lst))
+    return keyboard.as_markup()
+
+
+@dp.message(CommandStart())
+async def send_welcome(message):
     username = message.from_user.username
-    bot.reply_to(message, f'''Hello {username}! It's a bot for creating music quizes. Do not forget to challenge your friends! \nCommands usage: \n/add_song <playlist_name> - to start adding songs to your playlist. \n/delete_song <playlist_name> - to start deleting songs from your playlist.\n/get_songs <playlist_name>  - to see the list of the songs from your playlist.''')
+    await message.answer(text=f'''Hello {username}! It's a bot for creating music quizes. Do not forget to challenge your friends!''',
+                         reply_markup=kb.main)
 
-@bot.message_handler(commands=['add_song'])
-def ask_for_song_id(message):
-    try:
-        playlist_name = message.text.split()[1]
-        try:
-            cursor.execute(f"INSERT INTO users VALUES({message.from_user.id});")
-            db.commit()
-        except:
-            pass
-        
-        cursor.execute(f"SELECT id FROM playlists WHERE user_id={message.from_user.id} AND name='{playlist_name}';")
-        if not cursor.fetchall():
-            print(cursor.fetchall())
-            cursor.execute(f"INSERT INTO playlists(user_id, name) VALUES({message.from_user.id}, '{playlist_name}');")
-            db.commit()
-        cursor.execute(f"SELECT id FROM playlists WHERE user_id={message.from_user.id} AND name='{playlist_name}';")
-        # cursor.execute("SELECT * FROM users")
-        info[message.from_user.id] = cursor.fetchall()[0]['id']
-        username = message.from_user.username
-        user_state[message.from_user.id] = 'awaiting_song_id'
-        bot.reply_to(message, f'{username}, please provide the Spotify song link to add to the playlist {playlist_name}.')
-    except IndexError:
-        bot.reply_to(message, 'Please provide a playlist name. Usage: /add_song <playlist_name>')
-
-@bot.message_handler(func=lambda message: user_state.get(message.from_user.id) == 'awaiting_song_id')
-def add_song_to_playlist(message):
-    song_id = extract_spotify_track_id(message.text.strip())
-    user_id = message.from_user.id
-    playlist_id = info[message.from_user.id]
-    cursor.execute(f"SELECT name FROM playlists WHERE id={info[message.from_user.id]}")
-    playlist_name = cursor.fetchone()['name']
-    print(playlist_name, song_id)
-    preview_url, song_name = get_song_preview_url(song_id)
-    if preview_url:
-        user_path = f'songs/{user_id}'
-        filepath = f'songs/{user_id}/{playlist_name}'
-        if not os.path.exists(user_path):
-            os.mkdir(user_path)
-        if not os.path.exists(filepath):
-            os.mkdir(filepath)
-        filename = os.path.join(filepath, f'{song_name}.mp3')
-        download_preview(preview_url, filename)
-        cursor.execute(f"INSERT INTO songs VALUES('{song_id}', '{song_name}', {playlist_id})")
-        db.commit()
-        bot.reply_to(message, f'Song with name {song_name} has been added to playlist {playlist_name}.')
-        user_state.pop(message.from_user.id, None)
-        info.pop(message.from_user.id)
-    else:
-        bot.reply_to(message, 'Preview not available for this track. Please provide a valid Spotify song ID.')
-
-
-@bot.message_handler(commands=['get_songs', 'delete_song'])
-def get_songs(message):
-    try:
-        playlist_name = message.text.split()[1]
-        user_id = message.from_user.id
-        cursor.execute(f"SELECT id FROM playlists WHERE name='{playlist_name}' AND user_id={user_id}")
-        playlist_id = cursor.fetchone()['id']
-        reply = f'Here are the songs from playlist {playlist_name}:\n'
-        songs = get_songs_from_db(playlist_id)
-        info[user_id] = songs
-        for i, song in enumerate(songs):
-            reply += f'{i+1}. ' + song['name'] + "\n"
-
-        if message.text.split()[0] == '/delete_song':
-            user_state[message.from_user.id] = "awaiting_for_song_idx_del"
-            reply += "Enter an index of the song you want to delete:"
-        bot.reply_to(message, reply)
-    except IndexError:
-        bot.reply_to(message, f'Please provide a playlist name. Usage: {message.text} <playlist_name>')
-    except TypeError:
-        bot.reply_to(message, f"There is no such playlist")
-
-@bot.message_handler(commands=['get_playlists', 'delete_playlist', 'quiz'])
-def get_playlists(message):
-    user_id = message.from_user.id
-    cursor.execute(f"SELECT name FROM playlists WHERE user_id='{user_id}'")
-    playlists = cursor.fetchall()
-    if not playlists:
-        bot.reply_to(message, "There are no playlists in your library")
-        return
-    info[user_id] = playlists
-    reply = f'Here are your playlists:\n'
-    for i, playlist in enumerate(playlists):
-        reply += f'{i+1}. ' + playlist['name'] + "\n"
-
-    if message.text.split()[0] == '/delete_playlist':
-        user_state[message.from_user.id] = "awaiting_for_playlist_idx_del"
-        print(user_state)
-        reply += "Enter an index of the playlist you want to delete:"
-    if message.text.split()[0] == '/quiz':
-        user_state[message.from_user.id] = "awaiting_for_playlist_idx_quiz"
-        print(user_state)
-        reply += "Enter an index of the playlist to make a quiz based on it:"
-    bot.reply_to(message, reply)
-
-@bot.message_handler(func=lambda message: user_state.get(message.from_user.id) == 'awaiting_for_song_idx_del')
-def delete_song(message):
-    try:
-        song_idx = int(message.text.split()[0])
-        user_id = message.from_user.id
-        song = info[user_id][song_idx - 1]
-        name = song['name']
-        playlist_id = song['playlist_id']
-        cursor.execute(f"SELECT name FROM playlists WHERE id={playlist_id}")
-        playlist_name = cursor.fetchone()['name']
-        cursor.execute(f"DELETE FROM songs WHERE name='{name}' AND playlist_id={playlist_id}")
-        os.remove(f'songs/{user_id}/{playlist_name}/{name}.mp3')
-        db.commit()
-        bot.reply_to(message, f"The song {name} was deleted from playlist.")
-        user_state.pop(user_id)
-        info.pop(user_id)
-    except IndexError:
-        bot.reply_to(message, "Please provide the valid index which is in range.")
-
-
-@bot.message_handler(func=lambda message: user_state.get(message.from_user.id) == 'awaiting_for_playlist_idx_del')
-def delete_playlist(message):
-    try:
-        playlist_idx = int(message.text.split()[0])
-        user_id = message.from_user.id
-        playlist = info[user_id][playlist_idx - 1]
-        name = playlist['name']
-        cursor.execute(f"DELETE FROM playlists WHERE name='{name}' AND user_id={user_id}")
-        shutil.rmtree(f'songs/{user_id}/{name}')
-        db.commit()
-        bot.reply_to(message, f"The playlist {name} was deleted.")
-        user_state.pop(user_id)
-    except IndexError:
-        bot.reply_to(message, "Please provide the valid index which is in range.")
-
-@bot.message_handler(func=lambda message: user_state.get(message.from_user.id) == 'awaiting_for_playlist_idx_quiz')
-def start_quiz(message):
-    user_id = message.from_user.id
-    playlist_idx = int(message.text.split()[0])
-    playlist_name = playlists[playlist_idx - 1]['name']
-
-    cursor.execute("""
-            SELECT songs.name FROM songs 
-            JOIN playlists ON songs.playlist_id = playlists.id
-            WHERE playlists.user_id = %s AND playlists.name = %s
-        """, (user_id, playlist_name))
+@dp.message(Form.menu)
+async def send_menu(message, state):
+    await state.clear()
+    await message.answer(text=f'''Choose an option:''',
+                         reply_markup=kb.main)
     
-    songs = cursor.fetchall()
-    if len(songs) >= 4:
-        songs_list = []
-        for song in songs:
-            songs_list.append(song['name'])
-        random.shuffle(songs_list)
-        for song in songs_list:
-            incorrect_options = random.sample([song2 for song2 in songs_list if song2 != song], 3)
-            song_mp3 = open(f'songs/{user_id}/{playlist_name}/{song}.mp3')
-            
+@router_add_pl.callback_query(F.data=='create_playlist')
+async def ask_for_playlist_name(callback: CallbackQuery, state):
+    bot = Bot(token=TG_TOKEN)
+    await bot.send_message(callback.from_user.id, "Please provide a name of new playlist:")
+    await state.set_state(Form.waiting_for_playlist_name)
+    await bot.session.close()
 
-    else:
-        bot.reply_to(message, "Please add more songs to the playlist(minimal amount of songs - 4).")
-bot.infinity_polling()
+@router_add_pl.message(Form.waiting_for_playlist_name)
+async def create_playlist(message, state):
+    await state.clear()
+    db = await aiomysql.connect(
+        host='localhost',
+        user='root',
+        password=PASSWORD,
+        db='songs'
+    )
+    cursor = await db.cursor()
+    await cursor.execute(f"INSERT INTO playlists(name, user_id) VALUES('{message.text}', {message.from_user.id});")
+    await db.commit()
+    await message.answer(f"Playlist {message.text} was created successfully! Type anything to continue using the bot:")
+    await cursor.close()
+    db.close()
+    await state.set_state(Form.menu)
+
+@router_add_song.callback_query(F.data=='add_song')
+async def ask_for_song_id(callback: CallbackQuery, state):
+    db = await aiomysql.connect(
+        host='localhost',
+        user='root',
+        password=PASSWORD,
+        db='songs'
+    )
+    cursor = await db.cursor()
+    await cursor.execute(f"SELECT name FROM playlists WHERE user_id='{callback.from_user.id}'")
+    playlists_names = await cursor.fetchall()
+    await cursor.execute(f"SELECT id FROM playlists WHERE user_id='{callback.from_user.id}'")
+    playlists_ids = await cursor.fetchall()
+    bot = Bot(token=TG_TOKEN)
+    await cursor.close()
+    db.close()
+    await bot.send_message(callback.from_user.id, text=f'Choose the playlist from your library to add a song:', 
+                           reply_markup=(await inline_lists(playlists_names, playlists_ids, "playlist_add")))
+    await bot.session.close()
+
+@router_add_song.callback_query(F.data.endswith('playlist_add'))
+async def got_playlist(callback, state):
+    bot = Bot(token=TG_TOKEN)
+    await bot.send_message(callback.from_user.id, "Please provide a song link from spotify:")
+    await state.set_state(Form.waiting_for_song_id)
+    info[callback.from_user.id] = " ".join(callback.data.split()[:-1])
+    await bot.session.close()
+
+@router_add_song.message(Form.waiting_for_song_id)
+async def add_song_to_playlist(message, state):
+    try:
+        db = await aiomysql.connect(
+                host='localhost',
+                user='root',
+                password=PASSWORD,
+                db='songs'
+            )
+        cursor = await db.cursor()
+        song_id = await extract_spotify_track_id(message.text.strip())
+        user_id = message.from_user.id
+        playlist_id = info[message.from_user.id]
+        await cursor.execute(f"SELECT id FROM playlists WHERE id={playlist_id} AND user_id='{user_id}'")
+        playlist_name = (await cursor.fetchall())[0][0]
+        preview_url, song_name = get_song_preview_url(song_id)
+        if preview_url:
+            user_path = f'songs/{user_id}'
+            filepath = f'songs/{user_id}/{playlist_name}'
+            if not os.path.exists(user_path):
+                os.mkdir(user_path)
+            if not os.path.exists(filepath):
+                os.mkdir(filepath)
+            filename = os.path.join(filepath, f'{song_name}.mp3')
+            download_preview(preview_url, filename)
+            await cursor.execute(f"INSERT INTO songs VALUES('{song_id}', '{song_name}', {playlist_id})")
+            await db.commit()
+            info.pop(message.from_user.id)
+            await message.answer(f'Song with name {song_name} has been added to playlist {playlist_name}. Type anything to continue using the bot:')
+            await state.clear()
+            await state.set_state(Form.menu)
+        else:
+            await message.answer('Preview not available for this track. Please provide a valid Spotify song ID.')
+        await cursor.close()
+        db.close()
+    except TypeError:
+        await message.answer("The link of this song is invalid. Please provide a valid song link:")
+    except:
+        await message.answer("The song is already in the playlist. Please provide a song which is not present in the playlist:")
+
+@router_delete_song.callback_query(F.data=='delete_song')
+async def ask_for_song_id(callback: CallbackQuery, state):
+    db = await aiomysql.connect(
+        host='localhost',
+        user='root',
+        password=PASSWORD,
+        db='songs'
+    )
+    cursor = await db.cursor()
+    await cursor.execute(f"SELECT name FROM playlists WHERE user_id='{callback.from_user.id}'")
+    playlists_names = await cursor.fetchall()
+    await cursor.execute(f"SELECT id FROM playlists WHERE user_id='{callback.from_user.id}'")
+    playlists_ids = await cursor.fetchall()
+    bot = Bot(token=TG_TOKEN)
+    await cursor.close()
+    db.close()
+    await bot.send_message(callback.from_user.id, text=f'Choose the playlist from your library to delete a song:', 
+                           reply_markup=(await inline_lists(playlists_names, playlists_ids, "playlist_delete")))
+    await bot.session.close()
+
+@router_delete_song.callback_query(F.data.endswith('playlist_delete'))
+async def got_playlist_delete(callback, state):
+    bot = Bot(token=TG_TOKEN)
+    db = await aiomysql.connect(
+        host='localhost',
+        user='root',
+        password=PASSWORD,
+        db='songs'
+    )
+    cursor = await db.cursor()
+    playlist_id = " ".join(callback.data.split()[:-1])
+    await cursor.execute(f"SELECT name FROM playlists WHERE id={playlist_id} AND user_id={callback.from_user.id}")
+    playlist_name = (await cursor.fetchone())[0]
+    info[callback.from_user.id] = playlist_id
+    await cursor.execute(f"SELECT name FROM songs WHERE playlist_id={playlist_id}")
+    songs_names = await cursor.fetchall()
+    await cursor.execute(f"SELECT id FROM songs WHERE playlist_id={playlist_id}")
+    songs_ids = await cursor.fetchall()
+    await bot.send_message(callback.from_user.id, "Please select a song from playlist which you want to delete:", 
+                           reply_markup=(await inline_lists(songs_names, songs_ids, "song_delete")))
+    await cursor.close()
+    db.close()
+    await bot.session.close()
+
+@router_delete_song.callback_query(F.data.endswith('song_delete'))
+async def got_playlist_delete(callback, state):
+    bot = Bot(token=TG_TOKEN)
+    db = await aiomysql.connect(
+        host='localhost',
+        user='root',
+        password=PASSWORD,
+        db='songs'
+    )
+    cursor = await db.cursor()
+    user_id = callback.from_user.id
+    song_id = " ".join(callback.data.split()[:-1])
+    playlist_id = info[user_id]
+    await cursor.execute(f"SELECT name FROM songs WHERE id='{song_id}' AND playlist_id={playlist_id}")
+    song_name = (await cursor.fetchone())[0]
+    await cursor.execute(f"SELECT name FROM playlists WHERE id={playlist_id}")
+    playlist_name = (await cursor.fetchone())[0]
+    await cursor.execute(f"DELETE FROM songs WHERE name='{song_name}' AND playlist_id={playlist_id}")
+    os.remove(f"songs/{user_id}/{playlist_name}/{song_name}.mp3")
+    await db.commit()
+    await cursor.close()
+    db.close()
+    await bot.send_message(user_id, f"Song {song_name} was deleted successfully. Type anything to continue using bot:")
+    await state.set_state(Form.menu)
+
+@router_get.callback_query(F.data=='get_songs')
+async def ask_for_playlist_name(callback: CallbackQuery, state):
+    bot = Bot(token=TG_TOKEN)
+    db = await aiomysql.connect(
+        host='localhost',
+        user='root',
+        password=PASSWORD,
+        db='songs'
+    )
+    cursor = await db.cursor()
+    await cursor.execute(f"SELECT name FROM playlists WHERE user_id='{callback.from_user.id}'")
+    playlists_names = await cursor.fetchall()
+    await cursor.execute(f"SELECT id FROM playlists WHERE user_id='{callback.from_user.id}'")
+    playlists_ids = await cursor.fetchall()
+    await bot.send_message(callback.from_user.id, "Choose the playlist:", 
+                           reply_markup=(await inline_lists(playlists_names, playlists_ids, 'songs_get')))
+    await bot.session.close()
+
+@router_get.callback_query(F.data.endswith('songs_get'))
+async def ask_for_playlist_name(callback: CallbackQuery, state):
+    bot = Bot(token=TG_TOKEN)
+    db = await aiomysql.connect(
+        host='localhost',
+        user='root',
+        password=PASSWORD,
+        db='songs'
+    )
+    cursor = await db.cursor()
+    playlist_id = " ".join(callback.data.split()[:-1])
+    await cursor.execute(f"SELECT name FROM songs WHERE playlist_id='{playlist_id}'")
+    songs_names = await cursor.fetchall()
+    await cursor.execute(f"SELECT name FROM playlists WHERE id='{playlist_id}'")
+    playlist_name = (await cursor.fetchone())[0]
+    reply = f"Here are your songs from {playlist_name} playlist:\n"
+    for i, song in enumerate(songs_names):
+        reply += f"{i + 1}. " + song[0] + "\n"
+    await bot.send_message(callback.from_user.id, reply + "Type anything to continue using bot:")
+    await bot.session.close()
+    await state.set_state(Form.menu)
+
+@router_quiz.callback_query(F.data=='quiz')
+async def ask_for_playlist_name(callback: CallbackQuery, state):
+    bot = Bot(token=TG_TOKEN)
+    db = await aiomysql.connect(
+        host='localhost',
+        user='root',
+        password=PASSWORD,
+        db='songs'
+    )
+    cursor = await db.cursor()
+    await cursor.execute(f"SELECT name FROM playlists WHERE user_id='{callback.from_user.id}'")
+    playlists_names = await cursor.fetchall()
+    await cursor.execute(f"SELECT id FROM playlists WHERE user_id='{callback.from_user.id}'")
+    playlists_ids = await cursor.fetchall()
+    await bot.send_message(callback.from_user.id, "Choose the playlist for a quiz:", 
+                           reply_markup=(await inline_lists(playlists_names, playlists_ids, 'songs_get')))
+    await bot.session.close()
+async def main():
+    bot = Bot(token=TG_TOKEN)
+    await dp.start_polling(bot)
+
+if __name__ == '__main__':
+    asyncio.run(main())

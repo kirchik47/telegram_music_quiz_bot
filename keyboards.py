@@ -1,0 +1,10 @@
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+
+
+main = InlineKeyboardMarkup(inline_keyboard=[
+    [InlineKeyboardButton(text='Start quiz', callback_data='quiz')],
+    [InlineKeyboardButton(text='Add song', callback_data='add_song'), InlineKeyboardButton(text='Delete song', callback_data='delete_song')],
+    [InlineKeyboardButton(text='Get songs list', callback_data='get_songs'), InlineKeyboardButton(text='Create new playlist', callback_data='create_playlist')]
+    ],
+    input_field_placeholder='Choose an option'
+)
