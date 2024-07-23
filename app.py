@@ -9,7 +9,7 @@ from aiogram import Bot, Dispatcher, Router, types, F
 from aiogram.filters import CommandStart, Command
 from aiogram.filters.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from aiogram.types import InlineKeyboardButton, CallbackQuery
+from aiogram.types import InlineKeyboardButton, CallbackQuery, FSInputFile
 import aiomysql
 import asyncio
 import keyboards as kb
@@ -29,8 +29,13 @@ router_get = Router()
 dp.include_routers(*[router_add_pl, router_add_song, router_delete_song, router_delete_playlist, router_quiz, router_get])
 sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(client_id=CLIENT_ID,
                                                            client_secret=CLIENT_SECRET))
-user_state = {}
+cur_playlists = {}
 info = {}
+questions_left = {}
+max_amount = {}
+points = {}
+max_points = {}
+correct_options_dict = {}
 
 def get_song_preview_url(song_id):
     track_info = sp.track(song_id)
@@ -53,6 +58,7 @@ class Form(StatesGroup):
     waiting_for_song_id = State()
     waiting_for_playlist_name = State()
     menu = State()
+    got_amount = State()
 
 async def inline_lists(lst, ids, param):
     keyboard = InlineKeyboardBuilder()
@@ -139,7 +145,7 @@ async def add_song_to_playlist(message, state):
         song_id = await extract_spotify_track_id(message.text.strip())
         user_id = message.from_user.id
         playlist_id = info[message.from_user.id]
-        await cursor.execute(f"SELECT id FROM playlists WHERE id={playlist_id} AND user_id='{user_id}'")
+        await cursor.execute(f"SELECT name FROM playlists WHERE id={playlist_id} AND user_id='{user_id}'")
         playlist_name = (await cursor.fetchall())[0][0]
         preview_url, song_name = get_song_preview_url(song_id)
         if preview_url:
@@ -234,6 +240,7 @@ async def got_playlist_delete(callback, state):
     db.close()
     await bot.send_message(user_id, f"Song {song_name} was deleted successfully. Type anything to continue using bot:")
     await state.set_state(Form.menu)
+    await bot.session.close()
 
 @router_get.callback_query(F.data=='get_songs')
 async def ask_for_playlist_name(callback: CallbackQuery, state):
@@ -254,7 +261,7 @@ async def ask_for_playlist_name(callback: CallbackQuery, state):
     await bot.session.close()
 
 @router_get.callback_query(F.data.endswith('songs_get'))
-async def ask_for_playlist_name(callback: CallbackQuery, state):
+async def get_songs(callback: CallbackQuery, state):
     bot = Bot(token=TG_TOKEN)
     db = await aiomysql.connect(
         host='localhost',
@@ -276,22 +283,126 @@ async def ask_for_playlist_name(callback: CallbackQuery, state):
     await state.set_state(Form.menu)
 
 @router_quiz.callback_query(F.data=='quiz')
-async def ask_for_playlist_name(callback: CallbackQuery, state):
+async def ask_for_pl_quiz(callback: CallbackQuery, state):
     bot = Bot(token=TG_TOKEN)
-    db = await aiomysql.connect(
-        host='localhost',
-        user='root',
-        password=PASSWORD,
-        db='songs'
-    )
-    cursor = await db.cursor()
-    await cursor.execute(f"SELECT name FROM playlists WHERE user_id='{callback.from_user.id}'")
-    playlists_names = await cursor.fetchall()
-    await cursor.execute(f"SELECT id FROM playlists WHERE user_id='{callback.from_user.id}'")
-    playlists_ids = await cursor.fetchall()
-    await bot.send_message(callback.from_user.id, "Choose the playlist for a quiz:", 
-                           reply_markup=(await inline_lists(playlists_names, playlists_ids, 'songs_get')))
+    user_id = callback.from_user.id
+    try:
+        db = await aiomysql.connect(
+                host='localhost',
+                user='root',
+                password=PASSWORD,
+                db='songs'
+            )
+        cursor = await db.cursor()
+        await state.set_state(Form.got_amount)
+        await cursor.execute(f'''SELECT MAX(cnt) FROM (SELECT COUNT(name) as cnt FROM songs 
+                            WHERE playlist_id in (SELECT id FROM playlists WHERE user_id = {user_id})
+                            GROUP BY playlist_id) as counts''')
+        max_amount[user_id] = (await cursor.fetchone())[0] - 3
+        await cursor.close()
+        db.close()
+        if max_amount[user_id] < 1:
+            raise ValueError
+        await bot.send_message(user_id, f"Enter the amount of questions(less than {max_amount[user_id]}):")
+    except ValueError:
+        await bot.send_message(user_id, f"You have no playlists with more than 3 songs. Please add more songs to start quiz. Type anything to continue using bot:")
+        await state.clear()
+        await state.set_state(Form.menu)
     await bot.session.close()
+
+@router_quiz.message(Form.got_amount)
+async def quiz(message, state):
+    bot = Bot(token=TG_TOKEN)
+    user_id = message.from_user.id
+    try:
+        db = await aiomysql.connect(
+            host='localhost',
+            user='root',
+            password=PASSWORD,
+            db='songs'
+        )
+        cursor = await db.cursor()
+        questions_left[user_id] = int(message.text)
+        await cursor.execute(f"SELECT id FROM playlists WHERE user_id='{user_id}'")
+        playlists_ids = await cursor.fetchall()
+        new_ids = []
+        for playlist_id in playlists_ids:
+            await cursor.execute(f"SELECT name FROM songs WHERE playlist_id={playlist_id[0]}")
+            songs = await cursor.fetchall()
+            if len(songs) - 4 >= questions_left[user_id]:
+                new_ids.append(playlist_id[0])
+        if not new_ids:
+            await cursor.close()
+            db.close()
+            raise ValueError
+        max_points[user_id] = questions_left[user_id]
+        points[user_id] = 0
+        ids_str = str(new_ids).replace('[', '(').replace(']', ')')
+        await cursor.execute(f"SELECT name FROM playlists WHERE user_id='{user_id}' AND id IN {ids_str}")
+        playlists_names = await cursor.fetchall()
+        new_ids = [(id, ) for id in new_ids]
+        await bot.send_message(user_id, "Choose the playlist for a quiz:", 
+                            reply_markup=(await inline_lists(playlists_names, new_ids, 'quiz')))
+        await state.clear()
+        await cursor.close()
+        db.close()
+    except ValueError:
+        await bot.send_message(user_id, f"None of your playlists contain such a large amount of songs. Please enter the number less than {max_amount[user_id]}:")
+    await bot.session.close()
+
+    
+@router_quiz.callback_query(F.data.endswith('quiz'))
+async def quiz(callback: CallbackQuery, state):
+    user_id = callback.from_user.id
+    bot = Bot(token=TG_TOKEN)
+    if correct_options_dict.get(user_id) and correct_options_dict[user_id][0] == " ".join(callback.data.split()[:-1]):
+        points[user_id] += 1
+        await bot.send_message(user_id, "Correct!")
+    elif correct_options_dict.get(user_id):
+        await bot.send_message(user_id, f"Sorry, but you got it wrong...\nThe correct answer was {correct_options_dict[user_id][1]}")
+    questions_left[user_id] -= 1
+    if questions_left[user_id] >= 0:
+        db = await aiomysql.connect(
+            host='localhost',
+            user='root',
+            password=PASSWORD,
+            db='songs'
+        )
+        cursor = await db.cursor()
+        if not cur_playlists.get(user_id):
+            cur_playlists[user_id] = " ".join(callback.data.split()[:-1])
+        playlist_id = cur_playlists[user_id]
+
+        await cursor.execute(f"SELECT name FROM playlists WHERE id='{playlist_id}'")
+        playlist_name = (await cursor.fetchone())[0]
+        if not info.get(user_id):
+            await cursor.execute(f"SELECT name FROM songs WHERE playlist_id='{playlist_id}'")
+            songs_names = [name[0] for name in await cursor.fetchall()]
+            random.shuffle(songs_names)
+        else:
+            songs_names = info[user_id]
+        correct_option = songs_names.pop()
+        await cursor.execute(f"SELECT id FROM songs WHERE name='{correct_option}'")
+        correct_options_dict[user_id] = ((await cursor.fetchone())[0], correct_option)
+        info[user_id] = songs_names
+        incorrect_options = random.sample(songs_names, 3)
+        options = [correct_option] + incorrect_options
+        options = [(name, ) for name in options]
+        options_ids = []
+        random.shuffle(options)
+        for i in range(4):
+            await cursor.execute(f"SELECT id FROM songs WHERE name='{options[i][0]}' AND playlist_id={playlist_id}")
+            options_ids.append((await cursor.fetchone()))
+        await bot.send_voice(user_id, FSInputFile(f'songs/{user_id}/{playlist_name}/{correct_option}.mp3'), 
+                             caption=f'{max_points[user_id] - questions_left[user_id]}. Choose the correct answer:',
+                             reply_markup=(await inline_lists(options, options_ids, 'quiz')))
+        await cursor.close()
+        db.close()
+    else:
+        await bot.send_message(user_id, f"Congratulations, you've completed the quiz!!! You've got {points[user_id]}/{max_points[user_id]}!\n Type anything to continue using bot:")
+        await state.set_state(Form.menu)
+    await bot.session.close()
+
 async def main():
     bot = Bot(token=TG_TOKEN)
     await dp.start_polling(bot)
