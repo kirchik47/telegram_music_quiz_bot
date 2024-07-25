@@ -2,3 +2,4 @@ spotipy==2.23.0
 requests==2.31.0
 aiogram==3.10.0
 aiomysql==0.2.0
+librosa

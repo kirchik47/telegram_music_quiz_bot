@@ -9,10 +9,11 @@ from aiogram import Bot, Dispatcher, Router, types, F
 from aiogram.filters import CommandStart, Command
 from aiogram.filters.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from aiogram.types import InlineKeyboardButton, CallbackQuery, FSInputFile
+from aiogram.types import InlineKeyboardButton, CallbackQuery, FSInputFile, InlineKeyboardMarkup
 import aiomysql
 import asyncio
 import keyboards as kb
+import logging
 
 
 CLIENT_ID = os.getenv('CLIENT_ID')
@@ -29,6 +30,7 @@ router_get = Router()
 dp.include_routers(*[router_add_pl, router_add_song, router_delete_song, router_delete_playlist, router_quiz, router_get])
 sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(client_id=CLIENT_ID,
                                                            client_secret=CLIENT_SECRET))
+logger = logging.Logger(__name__)
 cur_playlists = {}
 info = {}
 questions_left = {}
@@ -67,21 +69,25 @@ async def inline_lists(lst, ids, param):
     keyboard = keyboard.adjust(*[1]*len(lst))
     return keyboard.as_markup()
 
-
 @dp.message(CommandStart())
 async def send_welcome(message):
     username = message.from_user.username
+    logger.info("START", extra={'user': username})
     await message.answer(text=f'''Hello {username}! It's a bot for creating music quizes. Do not forget to challenge your friends!''',
                          reply_markup=kb.main)
 
 @dp.message(Form.menu)
 async def send_menu(message, state):
+    username = message.from_user.username
+    logger.info("MENU", extra={'user': username})
     await state.clear()
     await message.answer(text=f'''Choose an option:''',
                          reply_markup=kb.main)
     
 @router_add_pl.callback_query(F.data=='create_playlist')
 async def ask_for_playlist_name(callback: CallbackQuery, state):
+    username = callback.from_user.username
+    logger.info("CREATE PLAYLIST", extra={'user': username})
     bot = Bot(token=TG_TOKEN)
     await bot.send_message(callback.from_user.id, "Please provide a name of new playlist:")
     await state.set_state(Form.waiting_for_playlist_name)
@@ -106,6 +112,8 @@ async def create_playlist(message, state):
 
 @router_add_song.callback_query(F.data=='add_song')
 async def ask_for_song_id(callback: CallbackQuery, state):
+    username = callback.from_user.username
+    logger.info("CHOOSE PLAYLIST", extra={'user': username})
     db = await aiomysql.connect(
         host='localhost',
         user='root',
@@ -126,6 +134,8 @@ async def ask_for_song_id(callback: CallbackQuery, state):
 
 @router_add_song.callback_query(F.data.endswith('playlist_add'))
 async def got_playlist(callback, state):
+    username = callback.from_user.username
+    logger.info("PROVIDE SONG ID", extra={'user': username})
     bot = Bot(token=TG_TOKEN)
     await bot.send_message(callback.from_user.id, "Please provide a song link from spotify:")
     await state.set_state(Form.waiting_for_song_id)
@@ -134,6 +144,8 @@ async def got_playlist(callback, state):
 
 @router_add_song.message(Form.waiting_for_song_id)
 async def add_song_to_playlist(message, state):
+    username = message.from_user.username
+    logger.info("ADD SONG", extra={'user': username})
     try:
         db = await aiomysql.connect(
                 host='localhost',
@@ -174,6 +186,8 @@ async def add_song_to_playlist(message, state):
 
 @router_delete_song.callback_query(F.data=='delete_song')
 async def ask_for_song_id(callback: CallbackQuery, state):
+    username = callback.from_user.username
+    logger.info("CHOOSE PLAYLIST", extra={'user': username})
     db = await aiomysql.connect(
         host='localhost',
         user='root',
@@ -194,6 +208,8 @@ async def ask_for_song_id(callback: CallbackQuery, state):
 
 @router_delete_song.callback_query(F.data.endswith('playlist_delete'))
 async def got_playlist_delete(callback, state):
+    username = callback.from_user.username
+    logger.info("CHOOSE SONG", extra={'user': username})
     bot = Bot(token=TG_TOKEN)
     db = await aiomysql.connect(
         host='localhost',
@@ -218,6 +234,8 @@ async def got_playlist_delete(callback, state):
 
 @router_delete_song.callback_query(F.data.endswith('song_delete'))
 async def got_playlist_delete(callback, state):
+    username = callback.from_user.username
+    logger.info("DELETE SONG", extra={'user': username})
     bot = Bot(token=TG_TOKEN)
     db = await aiomysql.connect(
         host='localhost',
@@ -244,6 +262,8 @@ async def got_playlist_delete(callback, state):
 
 @router_get.callback_query(F.data=='get_songs')
 async def ask_for_playlist_name(callback: CallbackQuery, state):
+    username = callback.from_user.username
+    logger.info("CHOOSE PLAYLIST", extra={'user': username})
     bot = Bot(token=TG_TOKEN)
     db = await aiomysql.connect(
         host='localhost',
@@ -262,6 +282,8 @@ async def ask_for_playlist_name(callback: CallbackQuery, state):
 
 @router_get.callback_query(F.data.endswith('songs_get'))
 async def get_songs(callback: CallbackQuery, state):
+    username = callback.from_user.username
+    logger.info("GET SONGS", extra={'user': username})
     bot = Bot(token=TG_TOKEN)
     db = await aiomysql.connect(
         host='localhost',
@@ -284,6 +306,8 @@ async def get_songs(callback: CallbackQuery, state):
 
 @router_quiz.callback_query(F.data=='quiz')
 async def ask_for_pl_quiz(callback: CallbackQuery, state):
+    username = callback.from_user.username
+    logger.info("QUESTIONS AMOUNT", extra={'user': username})
     bot = Bot(token=TG_TOKEN)
     user_id = callback.from_user.id
     try:
@@ -312,6 +336,8 @@ async def ask_for_pl_quiz(callback: CallbackQuery, state):
 
 @router_quiz.message(Form.got_amount)
 async def quiz(message, state):
+    username = message.from_user.username
+    logger.info("CHOOSE PLAYLIST", extra={'user': username})
     bot = Bot(token=TG_TOKEN)
     user_id = message.from_user.id
     try:
@@ -353,7 +379,9 @@ async def quiz(message, state):
     
 @router_quiz.callback_query(F.data.endswith('quiz'))
 async def quiz(callback: CallbackQuery, state):
+    username = callback.from_user.username
     user_id = callback.from_user.id
+    logger.info(f"QUIZ {questions_left[user_id]}", extra={'user': username})
     bot = Bot(token=TG_TOKEN)
     if correct_options_dict.get(user_id) and correct_options_dict[user_id][0] == " ".join(callback.data.split()[:-1]):
         points[user_id] += 1
@@ -399,7 +427,9 @@ async def quiz(callback: CallbackQuery, state):
         await cursor.close()
         db.close()
     else:
-        await bot.send_message(user_id, f"Congratulations, you've completed the quiz!!! You've got {points[user_id]}/{max_points[user_id]}!\n Type anything to continue using bot:")
+        await bot.send_message(user_id, text=f"Congratulations, you've completed the quiz!!! You've got {points[user_id]}/{max_points[user_id]}!\n Type anything to continue using bot and don't forget to share your quiz with your friends:",
+                               reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='Share a quiz', callback_data='quiz_share')]]))
+        
         await state.set_state(Form.menu)
     await bot.session.close()
 
@@ -407,5 +437,19 @@ async def main():
     bot = Bot(token=TG_TOKEN)
     await dp.start_polling(bot)
 
+class UserFilter(logging.Filter):
+    def filter(self, record):
+        
+        if not hasattr(record, 'user'):
+            record.user = 'system'
+        return True
+    
 if __name__ == '__main__':
+    handler = logging.FileHandler('app.log')
+    formatter = logging.Formatter("%(asctime)s %(user)s %(message)s")
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    logger.addFilter(UserFilter())
+    logger.info("Started")
     asyncio.run(main())
+    logger.info("Finished")
