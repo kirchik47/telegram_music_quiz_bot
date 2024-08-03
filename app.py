@@ -16,6 +16,10 @@ import keyboards as kb
 import logging
 import secrets
 from copy import deepcopy
+from transformers import LlamaForCausalLM, AutoTokenizer
+from openai import OpenAI
+import aiohttp
+import json
 
 
 CLIENT_ID = os.getenv('CLIENT_ID')
@@ -42,6 +46,13 @@ max_points = {}
 correct_options_dict = {}
 invitors = {}
 songs_all = {}
+quiz_type = {}
+counter = 0
+
+# tokenizer = AutoTokenizer.from_pretrained('meta-llama/Meta-Llama-3.1-8B-Instruct') 
+# model = LlamaForCausalLM.from_pretrained('meta-llama/Meta-Llama-3.1-8B-Instruct')
+
+client = OpenAI(base_url="http://localhost:1234/v1", api_key="lm-studio")
 
 
 def get_song_preview_url(song_id):
@@ -78,6 +89,26 @@ async def inline_lists(lst, ids, param):
 async def generate_unique_token():
     return secrets.token_hex(32)
 
+async def generate_question(prompt, url, model):
+    async with aiohttp.ClientSession() as session:
+        payload = {
+            'model': model,
+            'messages': [{"role": "system", "content": '''You are a bot for creating music quizes you always answer in json output format like {"question": your_generated_question, "options": your_generated_options, "correct_answer": your_generated_correct_answer}'''},
+                         {"role": "user", "content": prompt}],
+            'temperature': 2,
+            'max_tokens': 200, 
+            'example_output': {"question": "your_generated_question", 
+                               "options": ["your_generated_option1", 
+                                           "your_generated_option2",
+                                           "your_generated_option3",
+                                           "your_generated_option4"],
+                                "correct_answer": "your_generated_correct_answer"}
+        }
+        async with session.post(url, json=payload) as response:
+            result = await response.json()
+            return result['choices'][0]["message"]['content']
+
+
 @dp.message(CommandStart())
 async def send_welcome(message, state):
     username = message.from_user.username
@@ -96,16 +127,14 @@ async def send_welcome(message, state):
         user_id = message.from_user.id
         token = args[-1]
 
-        await cursor.execute(f"SELECT playlist_id FROM quiz_shares WHERE token='{token}'")
-        cur_playlists[user_id] = (await cursor.fetchone())[0]
-        await cursor.execute(f"SELECT user_id FROM quiz_shares WHERE token='{token}'")
-        inviter_user_id = int((await cursor.fetchone())[0])
+        await cursor.execute(f"SELECT playlist_id, user_id, quiz_type FROM quiz_shares WHERE token='{token}'")
+        cur_playlists[user_id], inviter_user_id, quiz_type[user_id] = (await cursor.fetchone())
         print(max_points)
+        inviter_user_id = int(inviter_user_id)
         max_points[user_id] = max_points[inviter_user_id]
         questions_left[user_id] = max_points[user_id]
         invitors[user_id] = inviter_user_id
         points[user_id] = 0
-        
         max_points.pop(inviter_user_id)
         questions_left.pop(inviter_user_id)
         points.pop(inviter_user_id)
@@ -361,11 +390,13 @@ async def get_songs(callback: CallbackQuery, state):
     await bot.session.close()
     await state.set_state(Form.menu)
 
-@router_quiz.callback_query(F.data=='quiz_amount')
+@router_quiz.callback_query(F.data.endswith('quiz_amount'))
 async def amount_quiz(callback: CallbackQuery, state):
     username = callback.from_user.username
+    user_id = callback.from_user.id
     logger.info("QUESTIONS AMOUNT", extra={'user': username})
     bot = Bot(token=TG_TOKEN)
+    quiz_type[user_id] = callback.data.split()[0]
     user_id = callback.from_user.id
     try:
         db = await aiomysql.connect(
@@ -438,15 +469,16 @@ async def pl_quiz(message, state):
     
 @router_quiz.callback_query(F.data.endswith('quiz'))
 async def quiz(callback: CallbackQuery, state):
-    username = callback.from_user.username
     user_id = callback.from_user.id
-    logger.info(f"QUIZ {questions_left[user_id]}", extra={'user': username})
+    username = callback.from_user.username
+    
     bot = Bot(token=TG_TOKEN)
-    if correct_options_dict.get(user_id) and correct_options_dict[user_id][0] == " ".join(callback.data.split()[:-1]):
-        points[user_id] += 1
-        await bot.send_message(user_id, "Correct!")
-    elif correct_options_dict.get(user_id):
-        await bot.send_message(user_id, f"Sorry, but you got it wrong...\nThe correct answer was {correct_options_dict[user_id][1]}")
+    if correct_options_dict.get(user_id):
+        if correct_options_dict[user_id][0] == " ".join(callback.data.split()[:-1]):
+            points[user_id] += 1
+            await bot.send_message(user_id, "Correct!")
+        else:
+            await bot.send_message(user_id, f"Sorry, but you got it wrong...\nThe correct answer was {correct_options_dict[user_id][1]}")
     questions_left[user_id] -= 1
     if questions_left[user_id] >= 0:
         db = await aiomysql.connect(
@@ -459,7 +491,6 @@ async def quiz(callback: CallbackQuery, state):
         if not cur_playlists.get(user_id):
             cur_playlists[user_id] = " ".join(callback.data.split()[:-1])
         playlist_id = cur_playlists[user_id]
-
         await cursor.execute(f"SELECT name FROM playlists WHERE id='{playlist_id}'")
         playlist_name = (await cursor.fetchone())[0]
         if not songs_left.get(user_id):
@@ -470,24 +501,53 @@ async def quiz(callback: CallbackQuery, state):
         else:
             songs_names = songs_left[user_id]
         correct_option = songs_names.pop()
-        print(songs_all[user_id])
-        await cursor.execute(f"SELECT id FROM songs WHERE name='{correct_option}'")
-        correct_options_dict[user_id] = ((await cursor.fetchone())[0], correct_option)
         songs_left[user_id] = songs_names
-        incorrect_options = random.sample([song for song in songs_all[user_id] if song != correct_option], 3)
-        options = [correct_option] + incorrect_options
-        options = [(name, ) for name in options]
-        options_ids = []
-        random.shuffle(options)
-        for i in range(4):
-            await cursor.execute(f"SELECT id FROM songs WHERE name='{options[i][0]}' AND playlist_id={playlist_id}")
-            options_ids.append((await cursor.fetchone()))
-        user_path = user_id if not invitors.get(user_id) else invitors[user_id]
-        await bot.send_voice(user_id, FSInputFile(f'songs/{user_path}/{playlist_name}/{correct_option}.mp3'), 
-                             caption=f'{max_points[user_id] - questions_left[user_id]}. Choose the correct answer:',
-                             reply_markup=(await inline_lists(options, options_ids, 'quiz')))
+        print(quiz_type)
+        if (quiz_type.get(user_id) and quiz_type[user_id] == 'melody') or (not quiz_type.get(user_id) and quiz_type[invitors[user_id]] == 'melody'):
+            logger.info(f"QUIZ MELODY {questions_left[user_id]}", extra={'user': username})
+            await cursor.execute(f"SELECT id FROM songs WHERE name='{correct_option}'")
+            correct_options_dict[user_id] = ((await cursor.fetchone())[0], correct_option)
+            incorrect_options = random.sample([song for song in songs_all[user_id] if song != correct_option], 3)
+            options = [correct_option] + incorrect_options
+            options = [(name, ) for name in options]
+            options_ids = []
+            random.shuffle(options)
+            for i in range(4):
+                await cursor.execute(f"SELECT id FROM songs WHERE name='{options[i][0]}' AND playlist_id={playlist_id}")
+                options_ids.append((await cursor.fetchone()))
+            user_path = user_id if not invitors.get(user_id) else invitors[user_id]
+            await bot.send_voice(user_id, FSInputFile(f'songs/{user_path}/{playlist_name}/{correct_option}.mp3'), 
+                                caption=f'{max_points[user_id] - questions_left[user_id]}. Choose the correct answer:',
+                                reply_markup=(await inline_lists(options, options_ids, 'quiz')))
+        else:
+            logger.info(f"QUIZ FACTS {questions_left[user_id]}", extra={'user': username})
+            prompt = f"Imagine that you are a creator of the whole music encyclopedia at MusicBrainz. Please provide a not really hard question as for a music quiz with 4 possible choices for this song:\n{correct_option}."
+            global counter
+            counter += 1
+            while True:
+                model = 'lmstudio-community/Meta-Llama-3.1-8B-Instruct-GGUF/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf'
+                # if counter % 2 == 0:
+                #     model += ':2'
+                question_str = await generate_question(prompt, 'http://localhost:1234/v1/chat/completions', model)
+                print(question_str)
+                start = question_str.find('{')
+                end = question_str.find('}')
+                try:
+                    question_dict = json.loads(question_str[start:end+1])
+                    correct_option = question_dict['correct_answer']
+                    correct_options_dict[user_id] = ('1', correct_option)
+                    options = [[option] for option in question_dict['options']]
+                    ids = [['0'], ['0'], ['0'], ['0']]
+                    ids[options.index([correct_option])] = ['1']
+                    break
+                except:
+                    pass
+            await bot.send_message(user_id, question_dict['question'],
+                                reply_markup=(await inline_lists(options, ids, 'quiz')))
         await cursor.close()
         db.close()
+                        
+
     else:
         if not invitors.get(user_id):
             await bot.send_message(user_id, text=f"Congratulations, you've completed the quiz!!! You've got {points[user_id]}/{max_points[user_id]}!\n Type anything to continue using bot and don't forget to share your quiz with your friends:",
@@ -497,6 +557,7 @@ async def quiz(callback: CallbackQuery, state):
             invitors.pop(user_id)
         songs_left.pop(user_id)
         songs_all.pop(user_id)
+        correct_options_dict.pop(user_id)
         await state.set_state(Form.menu)
     await bot.session.close()
 
@@ -513,7 +574,8 @@ async def quiz_share(callback: CallbackQuery, state):
     user_id = callback.from_user.id
     playlist_id = cur_playlists[user_id]
     token = await generate_unique_token()
-    await cursor.execute(f"INSERT INTO quiz_shares(token, user_id, playlist_id) VALUES('{token}', '{user_id}', {playlist_id})")
+    await cursor.execute(f"INSERT INTO quiz_shares(token, user_id, playlist_id, quiz_type) VALUES('{token}', '{user_id}', {playlist_id}, '{quiz_type[user_id]}')")
+    quiz_type.pop(user_id)
     await db.commit()
     share_url = f"https://t.me/guess_thee_music_bot?start={token}"
     await bot.send_message(user_id, text=f"Here is your link for the quiz which you can share with your friends:")
