@@ -44,7 +44,7 @@ max_amount = {}
 points = {}
 max_points = {}
 correct_options_dict = {}
-invitors = {}
+inviters_info = {}
 songs_all = {}
 quiz_type = {}
 counter = 0
@@ -79,10 +79,11 @@ class Form(StatesGroup):
     got_amount = State()
     invite_link = State()
 
-async def inline_lists(lst, ids, param):
+async def inline_lists(lst, ids, param, menu=True):
     keyboard = InlineKeyboardBuilder()
     for i, inst in enumerate(lst):
         keyboard.button(text=inst[0], callback_data=f'{ids[i][0]} {param}')
+    keyboard.button(text='Back to menu', callback_data='menu')
     keyboard = keyboard.adjust(*[1]*len(lst))
     return keyboard.as_markup()
 
@@ -127,19 +128,12 @@ async def send_welcome(message, state):
         user_id = message.from_user.id
         token = args[-1]
 
-        await cursor.execute(f"SELECT playlist_id, user_id, quiz_type FROM quiz_shares WHERE token='{token}'")
-        cur_playlists[user_id], inviter_user_id, quiz_type[user_id] = (await cursor.fetchone())
+        await cursor.execute(f"SELECT playlist_id, user_id, quiz_type, max_points FROM quiz_shares WHERE token='{token}'")
+        cur_playlists[user_id], inviter_user_id, quiz_type[user_id], max_points[user_id] = (await cursor.fetchone())
         print(max_points)
-        inviter_user_id = int(inviter_user_id)
-        max_points[user_id] = max_points[inviter_user_id]
+        inviters_info[user_id] = inviter_user_id
         questions_left[user_id] = max_points[user_id]
-        invitors[user_id] = inviter_user_id
         points[user_id] = 0
-        max_points.pop(inviter_user_id)
-        questions_left.pop(inviter_user_id)
-        points.pop(inviter_user_id)
-        cur_playlists.pop(inviter_user_id)
-        max_amount.pop(inviter_user_id)
 
         await message.answer(text=f"Hello {username}! You've been invited to complete a quiz from your friend! Press the button below to start quiz",
                              reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='Start quiz', callback_data=f'quiz')]]))
@@ -153,28 +147,34 @@ async def send_welcome(message, state):
         await message.answer(text=f'''Hello {username}! It's a bot for creating music quizes. Do not forget to challenge your friends!''',
                                 reply_markup=kb.main)
 
-@dp.message(Form.menu)
+@dp.callback_query(F.data=='menu')
 async def send_menu(message, state):
-    username = message.from_user.username
     user_id = message.from_user.id
-    logger.info("MENU", extra={'user': username})
-    await state.clear()
-    try:
+    if songs_left.get(user_id):
+        songs_left.pop(user_id)
+        songs_all.pop(user_id)
+        correct_options_dict.pop(user_id)
+        quiz_type.pop(user_id)
         points.pop(user_id)
         cur_playlists.pop(user_id)
         max_points.pop(user_id)
         questions_left.pop(user_id)
-    except:
-        pass
-    await message.answer(text=f'''Choose an option:''',
+    bot = Bot(token=TG_TOKEN)
+    username = message.from_user.username
+    logger.info("MENU", extra={'user': username})
+    await state.clear()
+    await bot.send_message(user_id, text=f'''Choose an option:''',
                          reply_markup=kb.main)
+    await bot.session.close()
     
 @router_add_pl.callback_query(F.data=='create_playlist')
 async def ask_for_playlist_name(callback: CallbackQuery, state):
     username = callback.from_user.username
     logger.info("CREATE PLAYLIST", extra={'user': username})
     bot = Bot(token=TG_TOKEN)
-    await bot.send_message(callback.from_user.id, "Please provide a name of new playlist:")
+    await bot.send_message(callback.from_user.id, "Please provide a name of new playlist:", 
+                           reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                               InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
     await state.set_state(Form.waiting_for_playlist_name)
     await bot.session.close()
 
@@ -193,7 +193,6 @@ async def create_playlist(message, state):
     await message.answer(f"Playlist {message.text} was created successfully! Type anything to continue using the bot:")
     await cursor.close()
     db.close()
-    await state.set_state(Form.menu)
 
 @router_add_song.callback_query(F.data=='add_song')
 async def ask_for_song_id(callback: CallbackQuery, state):
@@ -222,7 +221,9 @@ async def got_playlist(callback, state):
     username = callback.from_user.username
     logger.info("PROVIDE SONG ID", extra={'user': username})
     bot = Bot(token=TG_TOKEN)
-    await bot.send_message(callback.from_user.id, "Please provide a song link from spotify:")
+    await bot.send_message(callback.from_user.id, "Please provide a song link from spotify:",
+                           reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                               InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
     await state.set_state(Form.waiting_for_song_id)
     cur_playlists[callback.from_user.id] = " ".join(callback.data.split()[:-1])
     await bot.session.close()
@@ -231,6 +232,7 @@ async def got_playlist(callback, state):
 async def add_song_to_playlist(message, state):
     username = message.from_user.username
     logger.info("ADD SONG", extra={'user': username})
+    bot = Bot(token=TG_TOKEN)
     try:
         db = await aiomysql.connect(
                 host='localhost',
@@ -257,9 +259,10 @@ async def add_song_to_playlist(message, state):
             await cursor.execute(f"INSERT INTO songs VALUES('{song_id}', '{song_name}', {playlist_id})")
             await db.commit()
             cur_playlists.pop(message.from_user.id)
-            await message.answer(f'Song with name {song_name} has been added to playlist {playlist_name}. Type anything to continue using the bot:')
+            await bot.send_message(user_id, f'Song with name {song_name} has been added to playlist {playlist_name}.',
+                                   reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                                                InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
             await state.clear()
-            await state.set_state(Form.menu)
         else:
             await message.answer('Preview not available for this track. Please provide a valid Spotify song ID.')
         await cursor.close()
@@ -268,6 +271,7 @@ async def add_song_to_playlist(message, state):
         await message.answer("The link of this song is invalid. Please provide a valid song link:")
     except:
         await message.answer("The song is already in the playlist. Please provide a song which is not present in the playlist:")
+    await bot.session.close()
 
 @router_delete_song.callback_query(F.data=='delete_song')
 async def ask_for_song_id(callback: CallbackQuery, state):
@@ -342,8 +346,9 @@ async def got_playlist_delete(callback, state):
     await db.commit()
     await cursor.close()
     db.close()
-    await bot.send_message(user_id, f"Song {song_name} was deleted successfully. Type anything to continue using bot:")
-    await state.set_state(Form.menu)
+    await bot.send_message(user_id, f"Song {song_name} was deleted successfully.",
+                           reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                               InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
     await bot.session.close()
 
 @router_get.callback_query(F.data=='get_songs')
@@ -386,9 +391,10 @@ async def get_songs(callback: CallbackQuery, state):
     reply = f"Here are your songs from {playlist_name} playlist:\n"
     for i, song in enumerate(songs_names):
         reply += f"{i + 1}. " + song[0] + "\n"
-    await bot.send_message(callback.from_user.id, reply + "Type anything to continue using bot:")
+    await bot.send_message(callback.from_user.id, reply,
+                           reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                               InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
     await bot.session.close()
-    await state.set_state(Form.menu)
 
 @router_quiz.callback_query(F.data.endswith('quiz_amount'))
 async def amount_quiz(callback: CallbackQuery, state):
@@ -415,11 +421,12 @@ async def amount_quiz(callback: CallbackQuery, state):
         db.close()
         if max_amount[user_id] < 1:
             raise ValueError
-        await bot.send_message(user_id, f"Enter the amount of questions(less than {max_amount[user_id]}):")
+        await bot.send_message(user_id, f"Enter the amount of questions(less than {max_amount[user_id]}):",
+                               reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                               InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
     except ValueError:
         await bot.send_message(user_id, f"You have no playlists with songs. Please add songs to start quiz. Type anything to continue using bot:")
         await state.clear()
-        await state.set_state(Form.menu)
     await bot.session.close()
 
 @router_quiz.message(Form.got_amount)
@@ -503,7 +510,7 @@ async def quiz(callback: CallbackQuery, state):
         correct_option = songs_names.pop()
         songs_left[user_id] = songs_names
         print(quiz_type)
-        if (quiz_type.get(user_id) and quiz_type[user_id] == 'melody') or (not quiz_type.get(user_id) and quiz_type[invitors[user_id]] == 'melody'):
+        if (quiz_type.get(user_id) and quiz_type[user_id] == 'melody'):
             logger.info(f"QUIZ MELODY {questions_left[user_id]}", extra={'user': username})
             await cursor.execute(f"SELECT id FROM songs WHERE name='{correct_option}'")
             correct_options_dict[user_id] = ((await cursor.fetchone())[0], correct_option)
@@ -515,7 +522,7 @@ async def quiz(callback: CallbackQuery, state):
             for i in range(4):
                 await cursor.execute(f"SELECT id FROM songs WHERE name='{options[i][0]}' AND playlist_id={playlist_id}")
                 options_ids.append((await cursor.fetchone()))
-            user_path = user_id if not invitors.get(user_id) else invitors[user_id]
+            user_path = user_id if not inviters_info.get(user_id) else inviters_info[user_id]
             await bot.send_voice(user_id, FSInputFile(f'songs/{user_path}/{playlist_name}/{correct_option}.mp3'), 
                                 caption=f'{max_points[user_id] - questions_left[user_id]}. Choose the correct answer:',
                                 reply_markup=(await inline_lists(options, options_ids, 'quiz')))
@@ -549,16 +556,18 @@ async def quiz(callback: CallbackQuery, state):
                         
 
     else:
-        if not invitors.get(user_id):
-            await bot.send_message(user_id, text=f"Congratulations, you've completed the quiz!!! You've got {points[user_id]}/{max_points[user_id]}!\n Type anything to continue using bot and don't forget to share your quiz with your friends:",
-                                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='Share a quiz', callback_data='quiz_share')]]))
+        if not inviters_info.get(user_id):
+            await bot.send_message(user_id, text=f"Congratulations, you've completed the quiz!!! You've got {points[user_id]}/{max_points[user_id]}!\n Don't forget to share your quiz with your friends:",
+                                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='Share a quiz', callback_data='quiz_share')], 
+                                                                                   [InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
         else:
-            await bot.send_message(user_id, text=f"Congratulations, you've completed the quiz!!! You've got {points[user_id]}/{max_points[user_id]}!\n Type anything to continue using bot")
-            invitors.pop(user_id)
+            await bot.send_message(user_id, text=f"Congratulations, you've completed the quiz!!! You've got {points[user_id]}/{max_points[user_id]}!\n",
+                                   reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                                                InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
+            inviters_info.pop(user_id)
         songs_left.pop(user_id)
         songs_all.pop(user_id)
         correct_options_dict.pop(user_id)
-        await state.set_state(Form.menu)
     await bot.session.close()
 
 @router_quiz.callback_query(F.data.endswith('quiz_share'))
@@ -574,12 +583,14 @@ async def quiz_share(callback: CallbackQuery, state):
     user_id = callback.from_user.id
     playlist_id = cur_playlists[user_id]
     token = await generate_unique_token()
-    await cursor.execute(f"INSERT INTO quiz_shares(token, user_id, playlist_id, quiz_type) VALUES('{token}', '{user_id}', {playlist_id}, '{quiz_type[user_id]}')")
-    quiz_type.pop(user_id)
+    await cursor.execute(f'''INSERT INTO quiz_shares(token, user_id, playlist_id, quiz_type, max_points) 
+                           VALUES('{token}', '{user_id}', {playlist_id}, '{quiz_type[user_id]}', {max_points[user_id]})''')
     await db.commit()
     share_url = f"https://t.me/guess_thee_music_bot?start={token}"
     await bot.send_message(user_id, text=f"Here is your link for the quiz which you can share with your friends:")
-    await bot.send_message(user_id, text=share_url)
+    await bot.send_message(user_id, text=share_url, 
+                           reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                                        InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
     await cursor.close()
     await bot.session.close()
     db.close()
