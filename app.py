@@ -150,15 +150,14 @@ async def send_welcome(message, state):
 @dp.callback_query(F.data=='menu')
 async def send_menu(message, state):
     user_id = message.from_user.id
-    if songs_left.get(user_id):
-        songs_left.pop(user_id)
-        songs_all.pop(user_id)
-        correct_options_dict.pop(user_id)
-        quiz_type.pop(user_id)
-        points.pop(user_id)
-        cur_playlists.pop(user_id)
-        max_points.pop(user_id)
-        questions_left.pop(user_id)
+    songs_left.pop(user_id, None)
+    songs_all.pop(user_id, None)
+    correct_options_dict.pop(user_id, None)
+    quiz_type.pop(user_id, None)
+    points.pop(user_id, None)
+    cur_playlists.pop(user_id, None)
+    max_points.pop(user_id, None)
+    questions_left.pop(user_id, None)
     bot = Bot(token=TG_TOKEN)
     username = message.from_user.username
     logger.info("MENU", extra={'user': username})
@@ -181,18 +180,38 @@ async def ask_for_playlist_name(callback: CallbackQuery, state):
 @router_add_pl.message(Form.waiting_for_playlist_name)
 async def create_playlist(message, state):
     await state.clear()
+    bot = Bot(token=TG_TOKEN)
+    cur_playlists[message.from_user.id] = message.text
+    await bot.send_message(message.from_user.id, "Will it be public or private playlist?",
+                     reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Public", callback_data='public got_visibility')], 
+                                                        [InlineKeyboardButton(text="Private", callback_data='private got_visibility')],
+                                                        [InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
+    await bot.session.close()
+
+@router_add_pl.callback_query(F.data.endswith('got_visibility'))
+async def create_playlist(callback, state):
+    bot = Bot(token=TG_TOKEN)
     db = await aiomysql.connect(
-        host='localhost',
-        user='root',
-        password=PASSWORD,
-        db='songs'
-    )
+            host='localhost',
+            user='root',
+            password=PASSWORD,
+            db='songs'
+        )
     cursor = await db.cursor()
-    await cursor.execute(f"INSERT INTO playlists(name, user_id) VALUES('{message.text}', {message.from_user.id});")
+    visibility = callback.data.split()[0]
+    visibility = 1 if visibility == 'public' else 0
+    user_id = callback.from_user.id
+    playlist_name = cur_playlists[user_id]
+    cur_playlists.pop(user_id)
+    os.mkdir(f'songs/{user_id}/{playlist_name}')
+    await cursor.execute(f"INSERT INTO playlists(name, user_id, is_public) VALUES('{playlist_name}', {user_id}, {visibility});")
     await db.commit()
-    await message.answer(f"Playlist {message.text} was created successfully! Type anything to continue using the bot:")
+    await bot.send_message(user_id, text=f"Playlist {playlist_name} was created successfully!",
+                           reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                                        InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
     await cursor.close()
     db.close()
+    await bot.session.close()
 
 @router_add_song.callback_query(F.data=='add_song')
 async def ask_for_song_id(callback: CallbackQuery, state):
@@ -274,7 +293,7 @@ async def add_song_to_playlist(message, state):
     await bot.session.close()
 
 @router_delete_song.callback_query(F.data=='delete_song')
-async def ask_for_song_id(callback: CallbackQuery, state):
+async def delete_song(callback: CallbackQuery, state):
     username = callback.from_user.username
     logger.info("CHOOSE PLAYLIST", extra={'user': username})
     db = await aiomysql.connect(
@@ -292,11 +311,11 @@ async def ask_for_song_id(callback: CallbackQuery, state):
     await cursor.close()
     db.close()
     await bot.send_message(callback.from_user.id, text=f'Choose the playlist from your library to delete a song:', 
-                           reply_markup=(await inline_lists(playlists_names, playlists_ids, "playlist_delete")))
+                           reply_markup=(await inline_lists(playlists_names, playlists_ids, "playlist_list_delete_song")))
     await bot.session.close()
 
-@router_delete_song.callback_query(F.data.endswith('playlist_delete'))
-async def got_playlist_delete(callback, state):
+@router_delete_song.callback_query(F.data.endswith('playlist_list_delete_song'))
+async def playlist_list_delete(callback, state):
     username = callback.from_user.username
     logger.info("CHOOSE SONG", extra={'user': username})
     bot = Bot(token=TG_TOKEN)
@@ -316,13 +335,13 @@ async def got_playlist_delete(callback, state):
     await cursor.execute(f"SELECT id FROM songs WHERE playlist_id={playlist_id}")
     songs_ids = await cursor.fetchall()
     await bot.send_message(callback.from_user.id, "Please select a song from playlist which you want to delete:", 
-                           reply_markup=(await inline_lists(songs_names, songs_ids, "song_delete")))
+                           reply_markup=(await inline_lists(songs_names, songs_ids, "song_list_delete")))
     await cursor.close()
     db.close()
     await bot.session.close()
 
-@router_delete_song.callback_query(F.data.endswith('song_delete'))
-async def got_playlist_delete(callback, state):
+@router_delete_song.callback_query(F.data.endswith('song_list_delete'))
+async def song_list_delete(callback, state):
     username = callback.from_user.username
     logger.info("DELETE SONG", extra={'user': username})
     bot = Bot(token=TG_TOKEN)
@@ -351,6 +370,55 @@ async def got_playlist_delete(callback, state):
                                InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
     await bot.session.close()
 
+@router_delete_song.callback_query(F.data=='delete_playlist')
+async def ask_for_song_id(callback: CallbackQuery, state):
+    username = callback.from_user.username
+    logger.info("CHOOSE PLAYLIST DELETE", extra={'user': username})
+    db = await aiomysql.connect(
+        host='localhost',
+        user='root',
+        password=PASSWORD,
+        db='songs'
+    )
+    cursor = await db.cursor()
+    await cursor.execute(f"SELECT name FROM playlists WHERE user_id='{callback.from_user.id}'")
+    playlists_names = await cursor.fetchall()
+    await cursor.execute(f"SELECT id FROM playlists WHERE user_id='{callback.from_user.id}'")
+    playlists_ids = await cursor.fetchall()
+    bot = Bot(token=TG_TOKEN)
+    await cursor.close()
+    db.close()
+    await bot.send_message(callback.from_user.id, text=f'Choose the playlist from your library to delete it:', 
+                           reply_markup=(await inline_lists(playlists_names, playlists_ids, "playlist_list_delete")))
+    await bot.session.close()
+
+@router_delete_song.callback_query(F.data.endswith('playlist_list_delete'))
+async def ask_for_song_id(callback: CallbackQuery, state):
+    username = callback.from_user.username
+    logger.info("DELETE SONG", extra={'user': username})
+    bot = Bot(token=TG_TOKEN)
+    db = await aiomysql.connect(
+        host='localhost',
+        user='root',
+        password=PASSWORD,
+        db='songs'
+    )
+    cursor = await db.cursor()
+    user_id = callback.from_user.id
+    playlist_id = " ".join(callback.data.split()[:-1])
+
+    await cursor.execute(f"SELECT name FROM playlists WHERE id={playlist_id}")
+    playlist_name = (await cursor.fetchone())[0]
+    await cursor.execute(f"DELETE FROM playlists WHERE id={playlist_id}")
+    shutil.rmtree(f"songs/{user_id}/{playlist_name}")
+    await db.commit()
+    await cursor.close()
+    db.close()
+    await bot.send_message(user_id, f"Playlist {playlist_name} was deleted successfully.",
+                           reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                                        InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
+    await bot.session.close()
+    
 @router_get.callback_query(F.data=='get_songs')
 async def ask_for_playlist_name(callback: CallbackQuery, state):
     username = callback.from_user.username
@@ -391,6 +459,8 @@ async def get_songs(callback: CallbackQuery, state):
     reply = f"Here are your songs from {playlist_name} playlist:\n"
     for i, song in enumerate(songs_names):
         reply += f"{i + 1}. " + song[0] + "\n"
+    await cursor.close()
+    db.close()
     await bot.send_message(callback.from_user.id, reply,
                            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
                                InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
