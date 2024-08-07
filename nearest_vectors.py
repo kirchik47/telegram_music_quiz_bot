@@ -35,15 +35,24 @@ async def extract_features(playlist_path, song=None):
         all_features = features[:, np.newaxis] if not all_features.shape else np.hstack([all_features, features[:, np.newaxis]])
     return all_features.mean(axis=-1)
 
-async def insert(path):
+async def insert(path, is_public):
     playlist_name = path[path.rfind('/') + 1:]
     user_id = path[path.find('/') + 1:path.rfind('/')]
-    print(playlist_name, user_id)
     client = weaviate.use_async_with_local()
     await client.connect()
     collection = client.collections.get('Playlists')
+    song_collection = client.collections.get('Songs')
+    song = list(os.walk(path))[0][2][0]
+    print(song)
+    song_obj = await song_collection.query.fetch_objects(filters=Filter.by_property('name').equal(song), include_vector=True)
+    print(song_obj)
+    if song_obj.objects:
+        features = song_obj.objects[0].vector['default']
+    else:
+        features = await extract_features(path)
+        await song_collection.data.insert({'name': song}, vector=features.tolist())
     features = await extract_features(path)
-    resp = await collection.data.insert({'name': playlist_name, 'user_id': user_id, 'n_songs': 1}, vector=features.tolist())
+    resp = await collection.data.insert({'name': playlist_name, 'user_id': user_id, 'n_songs': 1, 'is_public': is_public}, vector=features.tolist())
     await client.close()
 
 async def update_add_song(path, song):
@@ -52,7 +61,13 @@ async def update_add_song(path, song):
     client = weaviate.use_async_with_local()
     await client.connect()
     collection = client.collections.get('Playlists')
-    features = await extract_features(path, song)
+    song_collection = client.collections.get('Songs')
+    song_obj = await song_collection.query.fetch_objects(filters=Filter.by_property('name').equal(song), include_vector=True)
+    if song_obj.objects:
+        features = song_obj.objects[0].vector['default']
+    else:
+        features = await extract_features(path, song)
+        await song_collection.data.insert({'name': song}, vector=features.tolist())
     data = await collection.query.fetch_objects(filters=(Filter.by_property('name').equal(playlist_name) & 
                                                          Filter.by_property('user_id').equal(user_id)), 
                                                 include_vector=True)
@@ -67,13 +82,20 @@ async def update_add_song(path, song):
     await client.close()
 
 async def search(path, n_questions, offset=None):
+    playlist_name = path[path.rfind('/') + 1:]
     client = weaviate.use_async_with_local()
     await client.connect()
     collection = client.collections.get('Playlists')
-    features = await extract_features(path)
-    res = await collection.query.near_vector(features.tolist(), return_metadata=MetadataQuery(distance=True, certainty=True),
+    pl = await collection.query.fetch_objects(filters=Filter.by_property('name').equal(playlist_name), include_vector=True)
+    print(pl)
+    if pl.objects:
+        features = pl.objects[0].vector['default']
+    else:
+        features = (await extract_features(path)).tolist()
+    res = await collection.query.near_vector(features, return_metadata=MetadataQuery(distance=True, certainty=True),
                                              limit=4, offset=offset, 
-                                             filters=Filter.by_property('n_songs').greater_or_equal(max(4, n_questions)))
+                                             filters=(Filter.by_property('n_songs').greater_or_equal(max(4, n_questions))
+                                                      & Filter.by_property('is_public').equal(1)))
     await client.close()
     return res
 
@@ -96,8 +118,13 @@ async def update_delete_song(path, song):
     client = weaviate.use_async_with_local()
     await client.connect()
     collection = client.collections.get('Playlists')
-    features = await extract_features(path, song)
-    print(playlist_name, user_id)
+    song_collection = client.collections.get('Songs')
+    song_obj = await song_collection.query.fetch_objects(filters=Filter.by_property('name').equal(song), include_vector=True)
+    if song_obj.objects:
+        features = song_obj.objects[0].vector['default']
+    else:
+        features = await extract_features(path, song)
+    print(features)
     data = await collection.query.fetch_objects(filters=(Filter.by_property('name').equal(playlist_name) & 
                                                          Filter.by_property('user_id').equal(user_id)), 
                                                 include_vector=True)
@@ -117,6 +144,7 @@ async def main(path, song=None):
     client = weaviate.use_async_with_local()
     await client.connect()
     collection = client.collections.get('Playlists')
+    # await collection.config.add_property(Property(name='is_public', data_type=DataType.INT))
     print(await collection.query.fetch_objects(include_vector=True))
     await client.close()
 

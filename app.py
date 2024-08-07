@@ -285,11 +285,10 @@ async def add_song_to_playlist(message, state):
             await cursor.execute(f"SELECT COUNT(name) FROM songs WHERE playlist_id={playlist_id}")
             n_songs = (await cursor.fetchone())[0]
             print(is_public)
-            if is_public:
-                if n_songs == 1:
-                    await nearest_vectors.insert(f'songs/{user_id}/{playlist_name}')
-                else:
-                    await nearest_vectors.update_add_song(f'songs/{user_id}/{playlist_name}', song_name + '.mp3')
+            if n_songs == 1:
+                await nearest_vectors.insert(f'songs/{user_id}/{playlist_name}', is_public)
+            else:
+                await nearest_vectors.update_add_song(f'songs/{user_id}/{playlist_name}', song_name + '.mp3')
             await bot.send_message(user_id, f'Song with name {song_name} has been added to playlist {playlist_name}.',
                                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
                                                 InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
@@ -374,9 +373,7 @@ async def song_list_delete(callback, state):
     playlist_name, is_public = (await cursor.fetchone())
     print(playlist_name, is_public)
     await cursor.execute(f'''DELETE FROM songs WHERE name="{song_name}" AND playlist_id={playlist_id}''')
-    
-    if is_public:
-        await nearest_vectors.update_delete_song(f'songs/{user_id}/{playlist_name}', song_name + '.mp3')
+    await nearest_vectors.update_delete_song(f'songs/{user_id}/{playlist_name}', song_name + '.mp3')
     os.remove(f"songs/{user_id}/{playlist_name}/{song_name}.mp3")
     await db.commit()
     await cursor.close()
@@ -431,8 +428,7 @@ async def ask_for_song_id(callback: CallbackQuery, state):
     await db.commit()
     await cursor.close()
     db.close()
-    if is_public:
-        await nearest_vectors.delete_playlist(f'songs/{user_id}/{playlist_name}')
+    await nearest_vectors.delete_playlist(f'songs/{user_id}/{playlist_name}')
     await bot.send_message(user_id, f"Playlist {playlist_name} was deleted successfully.",
                            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
                                         InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
