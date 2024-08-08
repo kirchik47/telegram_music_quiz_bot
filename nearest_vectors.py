@@ -7,6 +7,7 @@ from weaviate.classes.config import DataType, Property, Configure, VectorDistanc
 from weaviate.classes.query import MetadataQuery, Filter
 
 
+client = weaviate.use_async_with_local()
 async def extract_features(playlist_path, song=None):
     if song is None:
         filenames = list(os.walk(playlist_path))[0][2]
@@ -38,7 +39,6 @@ async def extract_features(playlist_path, song=None):
 async def insert(path, is_public):
     playlist_name = path[path.rfind('/') + 1:]
     user_id = path[path.find('/') + 1:path.rfind('/')]
-    client = weaviate.use_async_with_local()
     await client.connect()
     collection = client.collections.get('Playlists')
     song_collection = client.collections.get('Songs')
@@ -58,7 +58,6 @@ async def insert(path, is_public):
 async def update_add_song(path, song):
     playlist_name = path[path.rfind('/') + 1:]
     user_id = path[path.find('/') + 1:path.rfind('/')]
-    client = weaviate.use_async_with_local()
     await client.connect()
     collection = client.collections.get('Playlists')
     song_collection = client.collections.get('Songs')
@@ -83,7 +82,6 @@ async def update_add_song(path, song):
 
 async def search(path, n_questions, offset=None):
     playlist_name = path[path.rfind('/') + 1:]
-    client = weaviate.use_async_with_local()
     await client.connect()
     collection = client.collections.get('Playlists')
     pl = await collection.query.fetch_objects(filters=Filter.by_property('name').equal(playlist_name), include_vector=True)
@@ -102,7 +100,6 @@ async def search(path, n_questions, offset=None):
 async def delete_playlist(path):
     playlist_name = path[path.rfind('/') + 1:]
     user_id = path[path.find('/') + 1:path.rfind('/')]
-    client = weaviate.use_async_with_local()
     await client.connect()
     collection = client.collections.get('Playlists')
     data = await collection.query.fetch_objects(filters=(Filter.by_property('name').equal(playlist_name) & 
@@ -115,7 +112,6 @@ async def delete_playlist(path):
 async def update_delete_song(path, song):
     playlist_name = path[path.rfind('/') + 1:]
     user_id = path[path.find('/') + 1:path.rfind('/')]
-    client = weaviate.use_async_with_local()
     await client.connect()
     collection = client.collections.get('Playlists')
     song_collection = client.collections.get('Songs')
