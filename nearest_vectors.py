@@ -145,4 +145,5 @@ async def main(path, song=None):
     await client.close()
 
 if __name__ == "__main__":
-    asyncio.run(main('songs/7499606654/test_playlist', 'Coldplay - Fix You.mp3'))
+    asyncio.run(main('songs/1150895601/america', 'Coldplay - Fix You.mp3'))
+    
