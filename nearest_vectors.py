@@ -80,6 +80,14 @@ async def update_add_song(path, song):
     resp = await collection.data.update(uuid=uuid, properties={'n_songs': n_songs + 1}, vector=vector)
     await client.close()
 
+async def update_name(playlist_name, user_id, new_name):
+    await client.connect()
+    collection = client.collections.get('Playlists')
+    data = await collection.query.fetch_objects(filters=(Filter.by_property('name').equal(playlist_name) & 
+                                                         Filter.by_property('user_id').equal(user_id)))
+    uuid = data.objects[0].uuid
+    await collection.data.update(uuid=uuid, properties={'name': new_name})
+
 async def search(path, n_questions, offset=None):
     playlist_name = path[path.rfind('/') + 1:]
     await client.connect()

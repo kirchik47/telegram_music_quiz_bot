@@ -40,6 +40,10 @@ async def search(fields, text):
     await client.close()
     return playlists
 
+async def update(id, field, value):
+    await client.update(index='playlists', id=id, doc={field: value})
+    await client.close()
+
 async def main():
     index_body = {
         "settings": {
