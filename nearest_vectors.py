@@ -94,14 +94,16 @@ async def search(path, n_questions, offset=None):
     collection = client.collections.get('Playlists')
     pl = await collection.query.fetch_objects(filters=Filter.by_property('name').equal(playlist_name), include_vector=True)
     print(pl)
+    user_id = pl.objects[0].properties['user_id']
     if pl.objects:
         features = pl.objects[0].vector['default']
     else:
         features = (await extract_features(path)).tolist()
     res = await collection.query.near_vector(features, return_metadata=MetadataQuery(distance=True, certainty=True),
-                                             limit=4, offset=offset, 
+                                             limit=4, 
                                              filters=(Filter.by_property('n_songs').greater_or_equal(max(4, n_questions))
-                                                      & Filter.by_property('is_public').equal(1)))
+                                                      & Filter.by_property('is_public').equal(1) 
+                                                      & Filter.by_property('user_id').not_equal(user_id)))
     await client.close()
     return res
 
@@ -149,9 +151,12 @@ async def main(path, song=None):
     await client.connect()
     collection = client.collections.get('Playlists')
     # await collection.config.add_property(Property(name='is_public', data_type=DataType.INT))
+    # await delete_playlist(path)
     print(await collection.query.fetch_objects(include_vector=True))
     await client.close()
 
 if __name__ == "__main__":
-    asyncio.run(main('songs/1150895601/america', 'Coldplay - Fix You.mp3'))
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(main('songs/1150895601/Pop mix', 'Coldplay - Fix You.mp3'))
+    loop.close()
     

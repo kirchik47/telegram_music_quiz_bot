@@ -105,6 +105,7 @@ async def main():
     # await add_playlist(id=27, name='coldplay mix', username='kirchik47', desc='Coldplay mix, contains only coldplay songs')
     # await add_playlist(id=28, name='Pop mix', username='kirchik47', desc='Pop mix with such artists: Adele, Coldplay, Melanie Martinez, Imagine Dragons etc.')
     # print(await client.indices.analyze(index='playlists', body={'tokenizer': 'my_tokenizer', 'text': 'coldplay'}))
+    # await delete_playlist(28)
     print(await search(['name', 'username', 'description'], 'coldplay'))
 
 if __name__ == '__main__':

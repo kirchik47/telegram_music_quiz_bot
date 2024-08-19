@@ -9,6 +9,7 @@ from aiogram import Bot, Dispatcher, Router, types, F
 from aiogram.filters import CommandStart, Command
 from aiogram.filters.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.enums.parse_mode import ParseMode
 from aiogram.types import InlineKeyboardButton, CallbackQuery, FSInputFile, InlineKeyboardMarkup
 import aiomysql
 import asyncio
@@ -129,11 +130,11 @@ async def generate_question(prompt, url, model):
 async def send_welcome(message, state):
     username = message.from_user.username
     args = message.text.split()
+    user_id = message.from_user.id
     if len(args) > 1:
         username = message.from_user.username
         logger.info("QUIZ SHARE", extra={'user': username})
 
-        user_id = message.from_user.id
         token = args[-1]
         if songs_left.get(user_id):
             songs_left.pop(user_id, None)
@@ -162,13 +163,33 @@ async def send_welcome(message, state):
                 await message.answer(text=f"Hello {username}! You've been invited to complete a quiz from your friend! Press the button below to start quiz",
                                     reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='Start quiz', callback_data=f' quiz')]]))
                 
-                await cursor.execute(f"DELETE FROM quiz_shares WHERE token='{token}'")
-                await conn.commit()
     else:
         logger.info("START", extra={'user': username})
-        await message.answer(text=f'''Hello {username}! It's a bot for creating music quizes. Do not forget to challenge your friends!''',
-                                reply_markup=kb.main)
+        instruction = ""
+        with open('instruction.txt', 'r') as f:
+            lines = f.readlines()
+            for line in lines:
+                instruction += line
+        
+        await bot.send_message(user_id, text=f'''Hello {username}\! It's a bot for creating music quizes\. \
+                               Do not forget to challenge your friends\!\n\n''' + instruction,
+                               reply_markup=kb.main,
+                               parse_mode=ParseMode('MarkdownV2'))
 
+@dp.callback_query(F.data=='instruction')
+async def instruction(callback: CallbackQuery, state):
+    user_id = callback.from_user.id
+    username = callback.from_user.username
+    logging.info('INSTRUCTION', extra={'user': username})
+    instruction = ""
+    with open('instruction.txt', 'r') as f:
+        lines = f.readlines()
+        for line in lines:
+            instruction += line
+    await bot.send_message(user_id, text=instruction, 
+                           reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                                        InlineKeyboardButton(text='Back to menu', callback_data='menu')]]),
+                           parse_mode=ParseMode('MarkdownV2'))
 @dp.callback_query(F.data=='menu')
 async def send_menu(message, state):
     user_id = message.from_user.id
@@ -198,6 +219,12 @@ async def edit_playlist(callback: CallbackQuery, state):
             playlists_names = await cursor.fetchall()
             await cursor.execute(f"SELECT id FROM playlists WHERE user_id='{callback.from_user.id}'")
             playlists_ids = await cursor.fetchall()
+    if not playlists_ids:
+        await bot.send_message(user_id, text="You don't have any playlists in your library, so you can't delete anything. \
+                               Please create a playlist to interact with it.",
+                               reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                                            InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
+        return 
     await bot.send_message(callback.from_user.id, text=f'Choose the playlist from your library to edit it:', 
                            reply_markup=(await inline_lists(playlists_names, playlists_ids, "edit_playlist_chosen")))
     
@@ -396,6 +423,8 @@ async def create_playlist(callback, state):
     playlist_name = cur_playlists[user_id]['name']
     desc = cur_playlists[user_id]['desc']
     cur_playlists.pop(user_id)
+    if not os.path.exists(f'songs/{user_id}'):
+        os.mkdir(f'songs/{user_id}')
     os.mkdir(f'songs/{user_id}/{playlist_name}')
     async with pool.acquire() as conn:
         async with conn.cursor() as cursor:
@@ -408,6 +437,7 @@ async def create_playlist(callback, state):
 @router_add_song.callback_query(F.data=='add_song')
 async def ask_for_song_id(callback: CallbackQuery, state):
     username = callback.from_user.username
+    user_id = callback.from_user.id
     logger.info("CHOOSE PLAYLIST", extra={'user': username})
     async with pool.acquire() as conn:
         async with conn.cursor() as cursor:
@@ -415,7 +445,12 @@ async def ask_for_song_id(callback: CallbackQuery, state):
             playlists_names = await cursor.fetchall()
             await cursor.execute(f"SELECT id FROM playlists WHERE user_id='{callback.from_user.id}'")
             playlists_ids = await cursor.fetchall()
-    await bot.send_message(callback.from_user.id, text=f'Choose the playlist from your library to add a song:', 
+    if not playlists_ids:
+        await bot.send_message(user_id, text="You don't have any playlists in library. Please create a one to start adding songs to it.",
+                               reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                                        InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
+        return
+    await bot.send_message(user_id, text=f'Choose the playlist from your library to add a song:', 
                            reply_markup=(await inline_lists(playlists_names, playlists_ids, "playlist_add")))
 
 @router_add_song.callback_query(F.data.endswith(' playlist_add'))
@@ -470,14 +505,15 @@ async def add_song_to_playlist(message, state):
                     await state.clear()
                 else:
                     await message.answer('Preview not available for this track. Please provide a valid Spotify song ID.')
-    # except TypeError:
-    #     await message.answer("The link of this song is invalid. Please provide a valid song link:")
+    except TypeError:
+        await message.answer("The link of this song is invalid. Please provide a valid song link:")
     except aiomysql.IntegrityError:
         await message.answer("The song is already in the playlist. Please provide a song which is not present in the playlist:")
 
 @router_delete_song.callback_query(F.data=='delete_song')
 async def delete_song(callback: CallbackQuery, state):
     username = callback.from_user.username
+    user_id = callback.from_user.id
     logger.info("CHOOSE PLAYLIST", extra={'user': username})
     async with pool.acquire() as conn:
         async with conn.cursor() as cursor:
@@ -485,7 +521,13 @@ async def delete_song(callback: CallbackQuery, state):
             playlists_names = await cursor.fetchall()
             await cursor.execute(f"SELECT id FROM playlists WHERE user_id='{callback.from_user.id}'")
             playlists_ids = await cursor.fetchall()
-    await bot.send_message(callback.from_user.id, text=f'Choose the playlist from your library to delete a song:', 
+    if not playlists_ids:
+        await bot.send_message(user_id, text="You don't have any playlists in your library, so you can't delete anything. \
+                               Please create a playlist to interact with it.",
+                               reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                                            InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
+        return 
+    await bot.send_message(user_id, text=f'Choose the playlist from your library to delete a song:', 
                            reply_markup=(await inline_lists(playlists_names, playlists_ids, "playlist_list_delete_song")))
 
 @router_delete_song.callback_query(F.data.endswith(' playlist_list_delete_song'))
@@ -534,6 +576,7 @@ async def song_list_delete(callback, state):
 @router_delete_song.callback_query(F.data=='delete_playlist')
 async def ask_for_song_id(callback: CallbackQuery, state):
     username = callback.from_user.username
+    user_id = callback.from_user.id
     logger.info("CHOOSE PLAYLIST DELETE", extra={'user': username})
     async with pool.acquire() as conn:
         async with conn.cursor() as cursor:
@@ -541,7 +584,13 @@ async def ask_for_song_id(callback: CallbackQuery, state):
             playlists_names = await cursor.fetchall()
             await cursor.execute(f"SELECT id FROM playlists WHERE user_id='{callback.from_user.id}'")
             playlists_ids = await cursor.fetchall()
-    await bot.send_message(callback.from_user.id, text=f'Choose the playlist from your library to delete it:', 
+    if not playlists_ids:
+        await bot.send_message(user_id, text="You don't have any playlists in your library, so you can't delete anything. \
+                               Please create a playlist to interact with it.",
+                               reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                                            InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
+        return 
+    await bot.send_message(user_id, text=f'Choose the playlist from your library to delete it:', 
                            reply_markup=(await inline_lists(playlists_names, playlists_ids, "playlist_list_delete")))
 
 @router_delete_song.callback_query(F.data.endswith(' playlist_list_delete'))
@@ -571,17 +620,23 @@ async def ask_for_song_id(callback: CallbackQuery, state):
 @router_get.callback_query(F.data=='get_songs')
 async def ask_for_playlist_name(callback: CallbackQuery, state):
     username = callback.from_user.username
+    user_id = callback.from_user.id
     logger.info("CHOOSE PLAYLIST", extra={'user': username})
     async with pool.acquire() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute(f"SELECT name, is_public FROM playlists WHERE user_id='{callback.from_user.id}'")
-            playlists_names, is_public = zip(*(await cursor.fetchall()))
+            try:
+                playlists_names, is_public = zip(*(await cursor.fetchall()))
+            except ValueError:
+                await bot.send_message(user_id, text="You don't have any playlists. Please create a one to add songs to it.",
+                                       reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                                                    InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
             print(playlists_names, is_public)
             is_public_str_list = ['public' if is_public[i] else 'private' for i in range(len(is_public))]
             playlists_names = [(name + f" ({is_public_str})", ) for name, is_public_str in zip(playlists_names, is_public_str_list)]
             await cursor.execute(f"SELECT id FROM playlists WHERE user_id='{callback.from_user.id}'")
             playlists_ids = await cursor.fetchall()
-    await bot.send_message(callback.from_user.id, "Choose the playlist:", 
+    await bot.send_message(user_id, "Choose the playlist:", 
                            reply_markup=(await inline_lists(playlists_names, playlists_ids, 'get_songs_pl_chosen')))
 
 @router_get.callback_query(F.data.endswith(' get_songs_pl_chosen'))
@@ -614,24 +669,24 @@ async def amount_quiz(callback: CallbackQuery, state):
     logger.info("QUESTIONS AMOUNT", extra={'user': username})
     quiz_type[user_id] = callback.data.split()[0]
     user_id = callback.from_user.id
-    try:
-        async with pool.acquire() as conn:
-            async with conn.cursor() as cursor:
-                await state.set_state(Form.got_amount)
-                await cursor.execute(f'''SELECT MAX(cnt) FROM (SELECT COUNT(name) as cnt FROM songs 
-                                    WHERE playlist_id in (SELECT id FROM playlists WHERE user_id = {user_id})
-                                    GROUP BY playlist_id) as counts''')
-                max_amount[user_id] = (await cursor.fetchone())[0] 
-        if max_amount[user_id] < 1:
-            raise ValueError
-        await bot.send_message(user_id, f"Enter the amount of questions(less than or equal {max_amount[user_id]}):",
-                               reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                               InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
-    except ValueError:
-        await bot.send_message(user_id, f"You have no playlists with songs. Please add songs to start quiz.",
-                               reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                               InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            await state.set_state(Form.got_amount)
+            await cursor.execute(f'''SELECT MAX(cnt) FROM (SELECT COUNT(name) as cnt FROM songs 
+                                WHERE playlist_id in (SELECT id FROM playlists WHERE user_id = {user_id})
+                                GROUP BY playlist_id) as counts''')
+            max_amount[user_id] = (await cursor.fetchone())[0] 
+    if not max_amount[user_id] or max_amount[user_id] < 4:
+        await bot.send_message(user_id, text='''You don't have any playlists with more than 3 songs in your library. You must have minimum 4 songs in order to start a quiz. You can create playlists by clicking "Create new playlist", and adding new songs to the existing one by clicking "Add song".''',
+                                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                                            InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
         await state.clear()
+        return
+    if max_amount[user_id] < 1:
+        raise ValueError
+    await bot.send_message(user_id, f"Enter the amount of questions(less than or equal {max_amount[user_id]}):",
+                            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                            InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
 
 @router_quiz.message(Form.got_amount)
 async def pl_quiz(message, state):
@@ -733,7 +788,7 @@ async def quiz(callback: CallbackQuery, state):
                 else:
                     logger.info(f"QUIZ FACTS {questions_left[user_id]}", extra={'user': username})
                     prompt = f'''Q: Create a question-interesting fact for a music quiz with 4 possible options with only 1 answer for this song: Melanie Martinez - Tag, You're it.
-                    A:{{"question": "What is the album that Melanie Martinez released in 2014, and the song 'Tag, You're it' belongs to it?", "options": ["Crybaby", "Dollhouse", "K-12", "Portals"], "correct_answer": "Crybaby"'}}
+                    A:{{"question": "What is the album that Melanie Martinez released in 2015, and the song 'Tag, You're it' belongs to it?", "options": ["Crybaby", "Dollhouse", "K-12", "Portals"], "correct_answer": "Crybaby"'}}
                     
                     Q: Create a question-interesting fact for a music quiz with 4 possible options with only 1 answer for this song: Coldplay - Viva La Vida.
                     A:{{"question": "In Coldplay's song 'Viva La Vida' what does the narrator claim he used to rule?", "options": ["The seas", "The world", "The skies", "The people"], "correct_answer": "The world"'}}
@@ -810,7 +865,7 @@ async def other_playlist(callback: CallbackQuery, state):
     logger.info("QUESTIONS AMOUNT OTHER", extra={'user': username})
     async with pool.acquire() as conn:
         async with conn.cursor() as cursor:
-            await cursor.execute(f'''SELECT MAX(cnt) FROM (SELECT COUNT(name) as cnt FROM songs WHERE playlist_id IN (SELECT id FROM playlists WHERE is_public = 1)
+            await cursor.execute(f'''SELECT MAX(cnt) FROM (SELECT COUNT(name) as cnt FROM songs WHERE playlist_id IN (SELECT id FROM playlists WHERE is_public = 1 AND user_id <> '{user_id}')
                                 GROUP BY playlist_id) as counts''')
             max_amount[user_id] = (await cursor.fetchone())[0] 
     await bot.send_message(user_id, f"Enter the amount of questions(less than or equal {max_amount[user_id]}):",
@@ -842,14 +897,18 @@ async def other_playlist_got_amount(message, state):
                 if is_public:
                     offset = 1
                 objects = (await nearest_vectors.search(f'songs/{user_id}/{playlist_name}', offset=offset, n_questions=int(message.text))).objects
+                print(objects)
                 playlists_names = []
-                users_ids = []
                 playlists_ids = []
                 for obj in objects:
-                    playlists_names.append((obj.properties['name'], ))
-                    users_ids.append(obj.properties['user_id'])
+                    cur_user_id = obj.properties['user_id']
+                    print(type(cur_user_id))
+                    await cursor.execute(f"SELECT username FROM users WHERE id='{cur_user_id}'")
+                    cur_username = (await cursor.fetchone())[0]
+                    cur_playlist_name = obj.properties['name']
+                    playlists_names.append((cur_playlist_name + ' by ' + cur_username, ))
                     print(playlists_names)
-                    await cursor.execute(f"SELECT id FROM playlists WHERE name='{playlists_names[-1][0]}' AND user_id={users_ids[-1]}")
+                    await cursor.execute(f"SELECT id FROM playlists WHERE name='{cur_playlist_name}' AND user_id='{cur_user_id}'")
                     playlists_ids.append(await cursor.fetchone())
         print(playlists_ids)
         cur_playlists.pop(user_id)
