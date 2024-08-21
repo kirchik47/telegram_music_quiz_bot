@@ -23,6 +23,7 @@ import aiohttp
 import json
 import nearest_vectors
 import search
+import rag_genius
 
 
 CLIENT_ID = os.getenv('CLIENT_ID')
@@ -66,7 +67,9 @@ client = OpenAI(base_url="http://localhost:1234/v1", api_key="lm-studio")
 
 def get_song_preview_url(song_id):
     track_info = sp.track(song_id)
-    return track_info['preview_url'], track_info['album']['artists'][0]['name'] + " - " + track_info['name']
+    print(track_info['artists'])
+    artists = ", ".join([artist['name'] for artist in track_info['artists']])
+    return track_info['preview_url'], artists + " - " + track_info['name']
 
 def download_preview(url, filename):
     response = requests.get(url)
@@ -110,16 +113,21 @@ async def generate_question(prompt, url, model):
     async with aiohttp.ClientSession() as session:
         payload = {
             'model': model,
-            'messages': [{"role": "system", "content": '''You are a bot for creating music quizes you always answer in json output format like {"question": your_generated_question, "options": your_generated_options, "correct_answer": your_generated_correct_answer}'''},
+            'messages': [{"role": "system", "content": '''You are a bot for creating questions for music quizes. You always answer in json output format with a question, 4 options and 1 correct answer like this: {"question": your_generated_question, "options": your_generated_options, "correct_answer": your_generated_correct_answer}'''},
                          {"role": "user", "content": prompt}],
-            'temperature': 2,
+            'temperature': 0.2,
             'max_tokens': 200, 
-            'example_output': {"question": "your_generated_question", 
-                               "options": ["your_generated_option1", 
-                                           "your_generated_option2",
-                                           "your_generated_option3",
-                                           "your_generated_option4"],
-                                "correct_answer": "your_generated_correct_answer"}
+            'example_output': '''Q: Create a question-interesting fact for a music quiz with 4 possible options with only 1 answer for this song: Melanie Martinez - Tag, You're it.
+                    A:{{"question": "What is the album that Melanie Martinez released in 2015, and the song 'Tag, You're it' belongs to it?", "options": ["Crybaby", "Dollhouse", "K-12", "Portals"], "correct_answer": "Crybaby"'}}
+                    
+                    Q: Create a question-interesting fact for a music quiz with 4 possible options with only 1 answer for this song: Coldplay - Viva La Vida.
+                    A:{{"question": "In Coldplay's song 'Viva La Vida' what does the narrator claim he used to rule?", "options": ["The seas", "The world", "The skies", "The people"], "correct_answer": "The world"'}}
+                    
+                    Q: Create a question-interesting fact for a music quiz with 4 possible options with only 1 answer for this song: Eminem - Mockingbird.
+                    A:{{"question": "In Eminem's song 'Mockingbird' who is he primarily addressing in the lyrics?", "options": ["His mother", "His ex-wife", "His fans", "His daughters"], "correct_answer": "His daughters"'}}
+                    
+                    Q: Create a question-interesting fact for a music quiz with 4 possible options with only 1 answer for this song: {correct_option}.
+                    '''
         }
         async with session.post(url, json=payload) as response:
             result = await response.json()
@@ -787,21 +795,17 @@ async def quiz(callback: CallbackQuery, state):
                                         reply_markup=(await inline_lists(options, options_ids, 'quiz')))
                 else:
                     logger.info(f"QUIZ FACTS {questions_left[user_id]}", extra={'user': username})
-                    prompt = f'''Q: Create a question-interesting fact for a music quiz with 4 possible options with only 1 answer for this song: Melanie Martinez - Tag, You're it.
-                    A:{{"question": "What is the album that Melanie Martinez released in 2015, and the song 'Tag, You're it' belongs to it?", "options": ["Crybaby", "Dollhouse", "K-12", "Portals"], "correct_answer": "Crybaby"'}}
-                    
-                    Q: Create a question-interesting fact for a music quiz with 4 possible options with only 1 answer for this song: Coldplay - Viva La Vida.
-                    A:{{"question": "In Coldplay's song 'Viva La Vida' what does the narrator claim he used to rule?", "options": ["The seas", "The world", "The skies", "The people"], "correct_answer": "The world"'}}
-                    
-                    Q: Create a question-interesting fact for a music quiz with 4 possible options with only 1 answer for this song: Eminem - Mockingbird.
-                    A:{{"question": "In Eminem's song 'Mockingbird' who is he primarily addressing in the lyrics?", "options": ["His mother", "His ex-wife", "His fans", "His daughters"], "correct_answer": "His daughters"'}}
-                    
-                    Q: Create a question-interesting fact for a music quiz with 4 possible options with only 1 answer for this song: {correct_option}.
+                    info = await rag_genius.retrieve_info(correct_option)
+                    description = info['description']
+                    lyrics = info['lyrics']
+                    prompt = f'''Based on this description and lyrics of the song generate a question for a music quiz in a json format:\
+                    Description: {description}\
+                    Lyrics: {lyrics}
                     '''
                     global counter
                     counter += 1
                     while True:
-                        model = 'lmstudio-community/Meta-Llama-3.1-8B-Instruct-GGUF/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf'
+                        model = 'QuantFactory/Meta-Llama-3-8B-GGUF/Meta-Llama-3-8B.Q2_K.gguf'
                         # if counter % 2 == 0:
                         #     model += ':2'
                         question_str = await generate_question(prompt, 'http://localhost:1234/v1/chat/completions', model)
