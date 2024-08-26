@@ -5,68 +5,75 @@ import asyncio
 import weaviate
 from weaviate.classes.config import DataType, Property, Configure, VectorDistances
 from weaviate.classes.query import MetadataQuery, Filter
+from redis.asyncio import Redis 
+import json
 
 
 client = weaviate.use_async_with_local()
-async def extract_features(playlist_path, song=None):
-    if song is None:
-        filenames = list(os.walk(playlist_path))[0][2]
-    else:
-        filenames = [song]
-    print(filenames)
-    all_features = np.ndarray(shape=())
-    for filename in filenames:
-        print(filename)
-        y, sr = librosa.load(os.path.join(playlist_path, filename))
-        mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
-        chroma = librosa.feature.chroma_stft(y=y, sr=sr)
-        spectral_contrast = librosa.feature.spectral_contrast(y=y, sr=sr)
-        tonnetz = librosa.feature.tonnetz(y=y, sr=sr)
-        zcr = librosa.feature.zero_crossing_rate(y)
-        tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
-        print(mfccs.shape, chroma.shape, spectral_contrast.shape, tonnetz.shape, zcr.shape, tempo.shape)
-        features = np.hstack([
-            np.mean(mfccs, axis=1),
-            np.mean(chroma, axis=1),
-            np.mean(spectral_contrast, axis=1),
-            np.mean(tonnetz, axis=1),
-            np.mean(zcr),
-            tempo
-        ])
-        all_features = features[:, np.newaxis] if not all_features.shape else np.hstack([all_features, features[:, np.newaxis]])
-    return all_features.mean(axis=-1)
+redis_pool = Redis()
+async def extract_features(song):
+    filename = song + '.mp3'
 
-async def insert(path, is_public):
-    playlist_name = path[path.rfind('/') + 1:]
-    user_id = path[path.find('/') + 1:path.rfind('/')]
+    y, sr = librosa.load(os.path.join('songs', filename))
+    mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
+    chroma = librosa.feature.chroma_stft(y=y, sr=sr)
+    spectral_contrast = librosa.feature.spectral_contrast(y=y, sr=sr)
+    tonnetz = librosa.feature.tonnetz(y=y, sr=sr)
+    zcr = librosa.feature.zero_crossing_rate(y)
+    tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
+    print(mfccs.shape, chroma.shape, spectral_contrast.shape, tonnetz.shape, zcr.shape, tempo.shape)
+    features = np.hstack([
+        np.mean(mfccs, axis=1),
+        np.mean(chroma, axis=1),
+        np.mean(spectral_contrast, axis=1),
+        np.mean(tonnetz, axis=1),
+        np.mean(zcr),
+        tempo
+    ])
+    return features
+
+async def insert(playlist_name, user_id, song, is_public):
     await client.connect()
+    user_id = str(user_id)
     collection = client.collections.get('Playlists')
-    song_collection = client.collections.get('Songs')
-    song = list(os.walk(path))[0][2][0]
-    print(song)
-    song_obj = await song_collection.query.fetch_objects(filters=Filter.by_property('name').equal(song), include_vector=True)
-    print(song_obj)
-    if song_obj.objects:
-        features = song_obj.objects[0].vector['default']
+    cache_key = f'song-vector:{song}'
+    if await redis_pool.exists(cache_key):
+        features = json.loads(await redis_pool.get(cache_key))
     else:
-        features = await extract_features(path)
-        await song_collection.data.insert({'name': song}, vector=features.tolist())
-    features = await extract_features(path)
-    resp = await collection.data.insert({'name': playlist_name, 'user_id': user_id, 'n_songs': 1, 'is_public': is_public}, vector=features.tolist())
+        song_collection = client.collections.get('Songs')
+        song_obj = await song_collection.query.fetch_objects(filters=Filter.by_property('name').equal(song), include_vector=True)
+        print(song_obj)
+        if song_obj.objects:
+            features = song_obj.objects[0].vector['default']
+        else:
+            features = await extract_features(song)
+            print(features)
+            await song_collection.data.insert({'name': song}, vector=features.tolist())
+            features = features.tolist()
+        await redis_pool.set(cache_key, json.dumps(features), ex=1200)
+
+    resp = await collection.data.insert({'name': playlist_name, 'user_id': user_id, 'n_songs': 1, 'is_public': is_public}, 
+                                        vector=features)
     await client.close()
 
-async def update_add_song(path, song):
-    playlist_name = path[path.rfind('/') + 1:]
-    user_id = path[path.find('/') + 1:path.rfind('/')]
+async def update_add_song(playlist_name, user_id, song):
     await client.connect()
+    user_id = str(user_id)
     collection = client.collections.get('Playlists')
-    song_collection = client.collections.get('Songs')
-    song_obj = await song_collection.query.fetch_objects(filters=Filter.by_property('name').equal(song), include_vector=True)
-    if song_obj.objects:
-        features = song_obj.objects[0].vector['default']
+    cache_key = f'song-vector:{song}'
+    if await redis_pool.exists(cache_key):
+        features = json.loads(await redis_pool.get(cache_key))
     else:
-        features = await extract_features(path, song)
-        await song_collection.data.insert({'name': song}, vector=features.tolist())
+        song_collection = client.collections.get('Songs')
+        song_obj = await song_collection.query.fetch_objects(filters=Filter.by_property('name').equal(song), include_vector=True)
+        if song_obj.objects:
+            features = song_obj.objects[0].vector['default']
+        else:
+            features = await extract_features(song)
+            await song_collection.data.insert({'name': song}, vector=features.tolist())
+            features = features.tolist()
+        await redis_pool.set(cache_key, json.dumps(features), ex=1200)
+    
     data = await collection.query.fetch_objects(filters=(Filter.by_property('name').equal(playlist_name) & 
                                                          Filter.by_property('user_id').equal(user_id)), 
                                                 include_vector=True)
@@ -82,23 +89,20 @@ async def update_add_song(path, song):
 
 async def update_name(playlist_name, user_id, new_name):
     await client.connect()
+    user_id = str(user_id)
     collection = client.collections.get('Playlists')
     data = await collection.query.fetch_objects(filters=(Filter.by_property('name').equal(playlist_name) & 
                                                          Filter.by_property('user_id').equal(user_id)))
     uuid = data.objects[0].uuid
     await collection.data.update(uuid=uuid, properties={'name': new_name})
 
-async def search(path, n_questions, offset=None):
-    playlist_name = path[path.rfind('/') + 1:]
+async def search(playlist_name, user_id, n_questions, offset=None):
     await client.connect()
+    user_id = str(user_id)
     collection = client.collections.get('Playlists')
-    pl = await collection.query.fetch_objects(filters=Filter.by_property('name').equal(playlist_name), include_vector=True)
-    print(pl)
-    user_id = pl.objects[0].properties['user_id']
-    if pl.objects:
-        features = pl.objects[0].vector['default']
-    else:
-        features = (await extract_features(path)).tolist()
+    pl = await collection.query.fetch_objects(filters=(Filter.by_property('name').equal(playlist_name) & 
+                                                       Filter.by_property('user_id').equal(user_id)), include_vector=True)
+    features = pl.objects[0].vector['default']
     res = await collection.query.near_vector(features, return_metadata=MetadataQuery(distance=True, certainty=True),
                                              limit=4, 
                                              filters=(Filter.by_property('n_songs').greater_or_equal(max(4, n_questions))
@@ -107,10 +111,10 @@ async def search(path, n_questions, offset=None):
     await client.close()
     return res
 
-async def delete_playlist(path):
-    playlist_name = path[path.rfind('/') + 1:]
-    user_id = path[path.find('/') + 1:path.rfind('/')]
+async def delete_playlist(playlist_name, user_id):
     await client.connect()
+    playlist_name = str(playlist_name)
+    user_id = str(user_id)
     collection = client.collections.get('Playlists')
     data = await collection.query.fetch_objects(filters=(Filter.by_property('name').equal(playlist_name) & 
                                                          Filter.by_property('user_id').equal(user_id)), 
@@ -119,17 +123,23 @@ async def delete_playlist(path):
     res = await collection.data.delete_by_id(uuid=uuid)
     await client.close()
 
-async def update_delete_song(path, song):
-    playlist_name = path[path.rfind('/') + 1:]
-    user_id = path[path.find('/') + 1:path.rfind('/')]
+async def update_delete_song(playlist_name, user_id, song):
     await client.connect()
+    user_id = str(user_id)
     collection = client.collections.get('Playlists')
-    song_collection = client.collections.get('Songs')
-    song_obj = await song_collection.query.fetch_objects(filters=Filter.by_property('name').equal(song), include_vector=True)
-    if song_obj.objects:
-        features = song_obj.objects[0].vector['default']
+    cache_key = f'song-vector:{song}'
+    if await redis_pool.exists(cache_key):
+        features = json.loads(await redis_pool.get(cache_key))
+        print('redis')
     else:
-        features = await extract_features(path, song)
+        song_collection = client.collections.get('Songs')
+        song_obj = await song_collection.query.fetch_objects(filters=Filter.by_property('name').equal(song), include_vector=True)
+        if song_obj.objects:
+            features = song_obj.objects[0].vector['default']
+        else:
+            features = await extract_features(song)
+            features = features.tolist()
+        await redis_pool.set(cache_key, json.dumps(features), ex=1200)
     print(features)
     data = await collection.query.fetch_objects(filters=(Filter.by_property('name').equal(playlist_name) & 
                                                          Filter.by_property('user_id').equal(user_id)), 
@@ -152,8 +162,10 @@ async def main(path, song=None):
     collection = client.collections.get('Playlists')
     # await collection.config.add_property(Property(name='is_public', data_type=DataType.INT))
     # await delete_playlist(path)
+    # await update_delete_song('Coldplay mix', 1150895601, 'One Direction - Night Changes')
     print(await collection.query.fetch_objects(include_vector=True))
     await client.close()
+    await redis_pool.aclose()
 
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()

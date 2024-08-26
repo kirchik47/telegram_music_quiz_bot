@@ -13,7 +13,7 @@ from aiogram.enums.parse_mode import ParseMode
 from aiogram.types import InlineKeyboardButton, CallbackQuery, FSInputFile, InlineKeyboardMarkup
 import aiomysql
 import asyncio
-import keyboards as kb
+import telegram_music_quiz_bot.bot.keyboards as kb
 import logging
 import secrets
 from copy import deepcopy
@@ -21,9 +21,10 @@ from transformers import LlamaForCausalLM, AutoTokenizer
 from openai import OpenAI
 import aiohttp
 import json
-import nearest_vectors
+import telegram_music_quiz_bot.vector_search as vector_search
 import search
 import rag_genius
+from redis.asyncio import Redis
 
 
 CLIENT_ID = os.getenv('CLIENT_ID')
@@ -39,8 +40,8 @@ router_quiz = Router()
 router_get = Router()
 router_search = Router()
 router_edit = Router()
-dp.include_routers(*[router_add_pl, router_edit, router_add_song, router_delete_song, router_delete_playlist,
-                     router_quiz, router_get, router_search])
+dp.include_routers(router_add_pl, router_edit, router_add_song, router_delete_song, router_delete_playlist,
+                     router_quiz, router_get, router_search)
 bot = Bot(token=TG_TOKEN)
 sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(client_id=CLIENT_ID,
                                                            client_secret=CLIENT_SECRET))
@@ -63,15 +64,15 @@ generated_questions = {}
 # model = LlamaForCausalLM.from_pretrained('meta-llama/Meta-Llama-3.1-8B-Instruct')
 
 client = OpenAI(base_url="http://localhost:1234/v1", api_key="lm-studio")
+redis_pool = Redis()
 
-
-def get_song_preview_url(song_id):
+async def get_song_preview_url(song_id):
     track_info = sp.track(song_id)
     print(track_info['artists'])
     artists = ", ".join([artist['name'] for artist in track_info['artists']])
     return track_info['preview_url'], artists + " - " + track_info['name']
 
-def download_preview(url, filename):
+async def download_preview(url, filename):
     response = requests.get(url)
     with open(filename, 'wb') as file:
         file.write(response.content)
@@ -83,28 +84,26 @@ async def extract_spotify_track_id(url):
     else:
         return None
     
-
-class Form(StatesGroup):
-    waiting_for_song_id = State()
-    waiting_for_playlist_name = State()
-    menu = State()
-    got_amount = State()
-    invite_link = State()
-    other_playlist_got_amount = State()
-    waiting_for_amount = State()
-    waiting_for_description = State()
-    waiting_for_search_query = State()
-    search_got_amount = State()
-    edit_playlist_name = State()
-    edit_playlist_desc= State()
-
 async def inline_lists(lst, ids, param, menu=True):
     keyboard = InlineKeyboardBuilder()
     for i, inst in enumerate(lst):
-        keyboard.button(text=inst[0], callback_data=f'{ids[i][0]} {param}')
+        keyboard.button(text=inst, callback_data=f'{ids[i]} {param}')
     keyboard.button(text='Back to menu', callback_data='menu')
     keyboard = keyboard.adjust(*[1]*len(lst))
     return keyboard.as_markup()
+
+async def retrieve_data(sql_query, cache_key):
+    if not await redis_pool.exists(cache_key): 
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(sql_query)
+                result = list(zip(*(await cursor.fetchall())))
+    else:
+        result = json.loads(await redis_pool.get(cache_key))
+    if isinstance(result, list):
+        if len(result[0]) == 1:
+            result = [field[0] for field in result]
+    return result if result else None
 
 async def generate_unique_token():
     return secrets.token_hex(32)
@@ -115,7 +114,7 @@ async def generate_question(prompt, url, model):
             'model': model,
             'messages': [{"role": "system", "content": '''You are a bot for creating questions for music quizes. You always answer in json output format with a question, 4 options and 1 correct answer like this: {"question": your_generated_question, "options": your_generated_options, "correct_answer": your_generated_correct_answer}'''},
                          {"role": "user", "content": prompt}],
-            'temperature': 0.2,
+            'temperature': 0.9,
             'max_tokens': 200, 
             'example_output': '''Q: Create a question-interesting fact for a music quiz with 4 possible options with only 1 answer for this song: Melanie Martinez - Tag, You're it.
                     A:{{"question": "What is the album that Melanie Martinez released in 2015, and the song 'Tag, You're it' belongs to it?", "options": ["Crybaby", "Dollhouse", "K-12", "Portals"], "correct_answer": "Crybaby"'}}
@@ -133,6 +132,19 @@ async def generate_question(prompt, url, model):
             result = await response.json()
             return result['choices'][0]["message"]['content']
 
+class Form(StatesGroup):
+    waiting_for_song_id = State()
+    waiting_for_playlist_name = State()
+    menu = State()
+    got_amount = State()
+    invite_link = State()
+    other_playlist_got_amount = State()
+    waiting_for_amount = State()
+    waiting_for_description = State()
+    waiting_for_search_query = State()
+    search_got_amount = State()
+    edit_playlist_name = State()
+    edit_playlist_desc= State()
 
 @dp.message(CommandStart())
 async def send_welcome(message, state):
@@ -155,10 +167,15 @@ async def send_welcome(message, state):
             questions_left.pop(user_id, None)
         async with pool.acquire() as conn:
             async with conn.cursor() as cursor:
-                await cursor.execute(f"SELECT playlist_id, user_id, quiz_type, max_points, seed FROM quiz_shares WHERE token='{token}'")
-                try: 
-                    cur_playlists[user_id], inviter_user_id, quiz_type[user_id], max_points[user_id], users_seeds[user_id] = (await cursor.fetchone())
-                except TypeError:
+                cache_key = f'share_info:{token}'
+                if await redis_pool.exists(cache_key):
+                    share_info = await json.loads(redis_pool.get(cache_key))
+                    cur_playlists[user_id] = share_info['playlist_id']
+                    inviter_user_id = share_info['user_id']
+                    quiz_type[user_id] = share_info['quis_type']
+                    max_points[user_id] = share_info['max_points']
+                    users_seeds[user_id] = share_info['seed']
+                else:
                     await bot.send_message(user_id, text="You've been invited to complete a quiz from your friend! Sorry the link has expired, ask your friend for generating a new one.",
                                         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
                                                         InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
@@ -221,12 +238,17 @@ async def edit_playlist(callback: CallbackQuery, state):
     user_id = callback.from_user.id
     username = callback.from_user.username
     logging.info("EDIT PLAYLIST", extra={'user': username})
-    async with pool.acquire() as conn:
-        async with conn.cursor() as cursor:
-            await cursor.execute(f"SELECT name FROM playlists WHERE user_id='{callback.from_user.id}'")
-            playlists_names = await cursor.fetchall()
-            await cursor.execute(f"SELECT id FROM playlists WHERE user_id='{callback.from_user.id}'")
-            playlists_ids = await cursor.fetchall()
+    cache_key = f'user:{user_id}'
+    result = await retrieve_data(sql_query=f"SELECT id, name FROM playlists WHERE user_id='{callback.from_user.id}'",
+                                 cache_key=cache_key)
+    if isinstance(result, dict):
+        playlists_ids, playlists_names = list(zip(*json.loads(result['playlists'])))
+    elif isinstance(result, list):
+        playlists_ids, playlists_names = result 
+        await redis_pool.set(cache_key, json.dumps({"playlists": list(zip(playlists_ids, playlists_names)),
+                                                    "username": username}), ex=1200)
+    else:
+        playlists_ids = []
     if not playlists_ids:
         await bot.send_message(user_id, text="You don't have any playlists in your library, so you can't delete anything. \
                                Please create a playlist to interact with it.",
@@ -245,12 +267,23 @@ async def edit_playlist_chosen(callback: CallbackQuery, state):
     cur_playlists[user_id] = playlist_id
     async with pool.acquire() as conn:
         async with conn.cursor() as cursor:
-            await cursor.execute(f"SELECT name, description, is_public FROM playlists WHERE id={playlist_id}")
-            playlist_name, desc, is_public = await cursor.fetchone()
+            cache_key = f'playlist:{playlist_id}'
+            if not await redis_pool.exists(cache_key):
+                await cursor.execute(f"SELECT name, is_public, description FROM playlists WHERE id={playlist_id}")
+                playlist_name, is_public, description = await cursor.fetchone()
+                await redis_pool.set(cache_key, json.dumps({"name": playlist_name,
+                                                            "user_id": user_id,
+                                                            "is_public": is_public,
+                                                            "description": description}), ex=1200)
+            else:
+                json_info = json.loads(await redis_pool.get(cache_key))
+                playlist_name = json_info['name']
+                is_public = json_info['is_public']
+                description = json_info['description']
             visibility = 'public' if is_public else 'private'
-    await bot.send_message(callback.from_user.id, text=f'Name: {playlist_name}\nDescription: {desc}\n Visibility: {visibility}\nChoose either you want to edit name, discription or visibility:', 
-                           reply_markup=(await inline_lists([('Name', ), ('Description', ), ('Visibility', )], 
-                                                            [(0, ), (1, ), (2, )], "edit_playlist_option_chosen")))
+    await bot.send_message(callback.from_user.id, text=f'Name: {playlist_name}\n\nDescription: {description}\n\nVisibility: {visibility}\n\nChoose either you want to edit name, discription or visibility:', 
+                           reply_markup=(await inline_lists(['Name', 'Description', 'Visibility'], 
+                                                            [0, 1, 2], "edit_playlist_option_chosen")))
     
 @router_edit.callback_query(F.data.endswith('edit_playlist_option_chosen'))
 async def edit_playlist_option_chosen(callback: CallbackQuery, state):
@@ -273,12 +306,27 @@ async def edit_playlist_option_chosen(callback: CallbackQuery, state):
     else:
         async with pool.acquire() as conn:
             async with conn.cursor() as cursor:
-                await cursor.execute(f"SELECT is_public FROM playlists WHERE id={playlist_id}")
-                is_public = (await cursor.fetchone())[0]
+                cache_key = f'playlist:{playlist_id}'
+                if not await redis_pool.exists(cache_key):
+                    await cursor.execute(f"SELECT is_public FROM playlists WHERE id={playlist_id}")
+                    is_public = (await cursor.fetchone())[0]
+                else:
+                    json_info = json.loads(await redis_pool.get(cache_key))
+                    playlist_name = json_info['name']
+                    is_public = json_info['is_public']
+                    description = json_info['description']
+                    await redis_pool.delete(cache_key)
+                
                 await cursor.execute(f"UPDATE playlists SET is_public={not is_public}")
                 await conn.commit()
+
         reply = 'Private' if is_public else 'Public'
-        await bot.send_message(user_id, text=f'The visibility was succesfully changed to {reply}.',
+        if is_public:
+            await search.delete_playlist(playlist_id)
+        else:
+            await search.add_playlist(playlist_id, playlist_name, username, description)
+
+        await bot.send_message(user_id, text=f'Your playlist is now {reply}.',
                                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
                                InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
 
@@ -288,13 +336,21 @@ async def edit_playlist_chosen(message, state):
     username = message.from_user.username
     logging.info("CHANGE NAME", extra={'user': username})
     new_name = message.text
+    playlist_id = cur_playlists[user_id]
     async with pool.acquire() as conn:
         async with conn.cursor() as cursor:
-            await cursor.execute(f"SELECT name FROM playlists WHERE id={cur_playlists[user_id]}")
-            cur_playlist_name = (await cursor.fetchone())[0]
-            await cursor.execute(f'''UPDATE playlists SET name="{new_name}" WHERE id={cur_playlists[user_id]}''')
-            await search.update(id=cur_playlists[user_id], field='name', value=new_name)
-            await nearest_vectors.update_name(playlist_name=cur_playlist_name, user_id=str(user_id), new_name=new_name)
+            cache_key = f'playlist:{playlist_id}'
+            if not await redis_pool.exists(cache_key):
+                await cursor.execute(f"SELECT name FROM playlists WHERE id={playlist_id}")
+                cur_playlist_name = (await cursor.fetchone())[0]
+            else:
+                json_info = json.loads(await redis_pool.get(cache_key))
+                cur_playlist_name = json_info['name']
+                await redis_pool.delete(cache_key)
+
+            await cursor.execute(f'''UPDATE playlists SET name="{new_name}" WHERE id={playlist_id}''')
+            await search.update(id=playlist_id, field='name', value=new_name)
+            await vector_search.update_name(playlist_name=cur_playlist_name, user_id=str(user_id), new_name=new_name)
             await conn.commit()
     await bot.send_message(user_id, text=f'Name of the playlist was succesfully changed to {new_name}',
                            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
@@ -306,11 +362,14 @@ async def edit_playlist_chosen(message, state):
     username = message.from_user.username
     logging.info("CHANGE DESCRIPTION", extra={'user': username})
     new_desc = message.text
+    playlist_id = cur_playlists[user_id]
     async with pool.acquire() as conn:
         async with conn.cursor() as cursor:
-            await cursor.execute(f'''UPDATE playlists SET description="{new_desc}" WHERE id={cur_playlists[user_id]}''')
-            await search.update(id=cur_playlists[user_id], field='description', value=new_desc)
+            cache_key = f'playlist:{playlist_id}'
+            await cursor.execute(f'''UPDATE playlists SET description="{new_desc}" WHERE id={playlist_id}''')
+            await search.update(id=playlist_id, field='description', value=new_desc)
             await conn.commit()
+            await redis_pool.delete(cache_key)
     await bot.send_message(user_id, text=f'Description of the playlist was succesfully changed to {new_desc}',
                            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
                                InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
@@ -334,8 +393,8 @@ async def got_query(message, state):
     top_playlists = []
     print(top_playlists_info)
     for playlist in top_playlists_info:
-        ids.append((playlist['_id'], ))
-        top_playlists.append((playlist['_source']['name'] + " by " + playlist['_source']['username'], ))
+        ids.append(playlist['_id'])
+        top_playlists.append(playlist['_source']['name'] + " by " + str(playlist['_source']['username']))
     if ids:
         await bot.send_message(user_id, text='Here are the results of the search:',
                                 reply_markup=await inline_lists(top_playlists, ids=ids, param='search'))
@@ -353,11 +412,29 @@ async def playlist_chosen(callback: CallbackQuery, state):
     cur_playlists[user_id] = playlist_id
     async with pool.acquire() as conn:
         async with conn.cursor() as cursor:
-            await cursor.execute(f"SELECT name, user_id, description FROM playlists WHERE id={playlist_id}")
-            playlist_name, playlist_user_id, desc = await cursor.fetchone()
-            await cursor.execute(f"SELECT username FROM users WHERE id={playlist_user_id}")
-            playlist_creator_username = (await cursor.fetchone())[0]
-    await bot.send_message(user_id, text=f'{playlist_name} by {playlist_creator_username}.\n{desc}\n Do you want to attempt quiz based on this playlist?', 
+            cache_key = f'playlist:{playlist_id}'
+            result = await retrieve_data(sql_query=f"SELECT name, is_public, description, user_id FROM playlists WHERE id={playlist_id}",
+                                 cache_key=cache_key)
+            if isinstance(result, dict):
+                playlist_name = result['name']
+                playlist_user_id = result['user_id']
+                description = result['description']
+            elif isinstance(result, list):
+                playlist_name, is_public, description, playlist_user_id = result 
+                await redis_pool.set(cache_key, json.dumps({"name": playlist_name,
+                                                            "user_id": user_id,
+                                                            "is_public": is_public,
+                                                            "description": description}), ex=1200)
+            cache_key = f'user:{playlist_user_id}'
+            if not await redis_pool.exists(cache_key):
+                await cursor.execute(f"SELECT username FROM users WHERE id={playlist_user_id}")
+                playlist_creator_username = (await cursor.fetchone())[0]
+                await redis_pool.set(cache_key, json.dumps({"username": playlist_creator_username}), ex=1200)
+            else:
+                json_info = json.loads(await redis_pool.get(cache_key))
+                playlist_creator_username = json_info['username']
+
+    await bot.send_message(user_id, text=f'{playlist_name} by {playlist_creator_username}.\n{description}\n Do you want to attempt quiz based on this playlist?', 
                            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                                [InlineKeyboardButton(text='Attempt quiz', callback_data='search_quiz')],
                                [InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
@@ -369,6 +446,7 @@ async def quiz_attempt(callback: CallbackQuery, state):
         async with conn.cursor() as cursor:
             await cursor.execute(f"SELECT COUNT(name) FROM songs WHERE playlist_id={cur_playlists[user_id]}")
             max_amount[user_id] = (await cursor.fetchone())[0]
+            print(max_amount[user_id])
     await bot.send_message(user_id, text=f'Please enter amount of questions in the quiz(less than or equal {max_amount[user_id]}):',
                            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
                                InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
@@ -415,7 +493,7 @@ async def create_playlist(message, state):
 @router_add_pl.message(Form.waiting_for_description)
 async def create_playlist(message, state):
     await state.clear()
-    cur_playlists[message.from_user.id]['desc'] = message.text
+    cur_playlists[message.from_user.id]['description'] = message.text
     await bot.send_message(message.from_user.id, "Will it be public or private playlist?",
                      reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Public", callback_data='public got_visibility')], 
                                                         [InlineKeyboardButton(text="Private", callback_data='private got_visibility')],
@@ -429,15 +507,22 @@ async def create_playlist(callback, state):
     visibility = 1 if visibility == 'public' else 0
     user_id = callback.from_user.id
     playlist_name = cur_playlists[user_id]['name']
-    desc = cur_playlists[user_id]['desc']
+    description = cur_playlists[user_id]['description']
     cur_playlists.pop(user_id)
-    if not os.path.exists(f'songs/{user_id}'):
-        os.mkdir(f'songs/{user_id}')
-    os.mkdir(f'songs/{user_id}/{playlist_name}')
     async with pool.acquire() as conn:
         async with conn.cursor() as cursor:
-            await cursor.execute(f"INSERT INTO playlists(name, user_id, is_public, description) VALUES('{playlist_name}', {user_id}, {visibility}, '{desc}');")
+            await cursor.execute(f"INSERT INTO playlists(name, user_id, is_public, description) VALUES('{playlist_name}', {user_id}, {visibility}, '{description}');")
             await conn.commit()
+            await redis_pool.delete(f'user:{user_id}')
+            await cursor.execute(f"SELECT id FROM playlists WHERE name='{playlist_name}' AND user_id={user_id}")
+            playlist_id = (await  cursor.fetchone())[0]
+            playlist_info = {
+                "name": playlist_name,
+                "user_id": user_id,
+                "is_public": visibility,
+                "description": description
+            }
+            await redis_pool.set(f"playlist:{playlist_id}", str(playlist_info), ex=1200)
     await bot.send_message(user_id, text=f"Playlist {playlist_name} was created successfully!",
                            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
                                         InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
@@ -447,12 +532,17 @@ async def ask_for_song_id(callback: CallbackQuery, state):
     username = callback.from_user.username
     user_id = callback.from_user.id
     logger.info("CHOOSE PLAYLIST", extra={'user': username})
-    async with pool.acquire() as conn:
-        async with conn.cursor() as cursor:
-            await cursor.execute(f"SELECT name FROM playlists WHERE user_id='{callback.from_user.id}'")
-            playlists_names = await cursor.fetchall()
-            await cursor.execute(f"SELECT id FROM playlists WHERE user_id='{callback.from_user.id}'")
-            playlists_ids = await cursor.fetchall()
+    cache_key = f'user:{user_id}'
+    result = await retrieve_data(sql_query=f"SELECT id, name FROM playlists WHERE user_id='{callback.from_user.id}'",
+                                 cache_key=cache_key)
+    if isinstance(result, dict):
+        playlists_ids, playlists_names = list(zip(*result['playlists']))
+    elif isinstance(result, list):
+        playlists_ids, playlists_names = result 
+        await redis_pool.set(cache_key, json.dumps({"playlists": list(zip(playlists_ids, playlists_names)),
+                                                    "username": username}), ex=1200)
+    else:
+        playlists_ids = []
     if not playlists_ids:
         await bot.send_message(user_id, text="You don't have any playlists in library. Please create a one to start adding songs to it.",
                                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
@@ -475,60 +565,95 @@ async def got_playlist(callback, state):
 async def add_song_to_playlist(message, state):
     username = message.from_user.username
     logger.info("ADD SONG", extra={'user': username})
+    user_id = message.from_user.id
     try:
-        
-        song_id = await extract_spotify_track_id(message.text.strip())
-        user_id = message.from_user.id
+        spotify_url = message.text.strip()
+        cache_key = f'song_url:{spotify_url}'
+        preview_url = '123'
+        if not await redis_pool.exists(cache_key):
+            song_id = await extract_spotify_track_id(spotify_url)
+            preview_url, song_name = await get_song_preview_url(song_id)
+        else:
+            json_info = json.loads(await redis_pool.get(cache_key))
+            song_id = json_info['id']
+            song_name = json_info['name']
+
         playlist_id = cur_playlists[message.from_user.id]
+
         async with pool.acquire() as conn:
             async with conn.cursor() as cursor:
-                await cursor.execute(f"SELECT name, is_public, description FROM playlists WHERE id={playlist_id} AND user_id='{user_id}'")
-                playlist_name, is_public, desc = (await cursor.fetchone())
-                preview_url, song_name = get_song_preview_url(song_id)
+                cache_key = f'playlist:{playlist_id}'
+                result = await retrieve_data(sql_query=f"SELECT name, is_public, description FROM playlists WHERE id={playlist_id}",
+                                 cache_key=cache_key)
+                if isinstance(result, dict):
+                    playlist_name = result['name']
+                    is_public = result['is_public']
+                    description = result['description']
+                else:
+                    playlist_name, is_public, description = result 
+                    await redis_pool.set(cache_key, json.dumps({"name": playlist_name,
+                                                                "user_id": user_id,
+                                                                "is_public": is_public,
+                                                                "description": description}), ex=1200)
+
                 if preview_url:
-                    user_path = f'songs/{user_id}'
-                    filepath = f'songs/{user_id}/{playlist_name}'
-                    if not os.path.exists(user_path):
-                        os.mkdir(user_path)
-                    if not os.path.exists(filepath):
-                        os.mkdir(filepath)
-                    filename = os.path.join(filepath, f'{song_name}.mp3')
-                    download_preview(preview_url, filename)
+                    path = f'songs/'
+                    print(playlist_name)
+                    filename = os.path.join(path, f'{song_name}.mp3')
+                    print(os.path.exists(filename))
+                    if not os.path.exists(filename):
+                        await download_preview(preview_url, filename)
+
                     await cursor.execute(f'''INSERT INTO songs VALUES('{song_id}', "{song_name}", {playlist_id})''')
                     await conn.commit()
+                    cache_key = f'song:{spotify_url}'
+                    await redis_pool.set(cache_key, json.dumps({"name": song_name, "id": song_id}), ex=1200)
+                    await redis_pool.set(f'song:{song_id}', json.dumps({"name": song_name}), ex=1200)
 
                     await cursor.execute(f"SELECT COUNT(name) FROM songs WHERE playlist_id={playlist_id}")
                     n_songs = (await cursor.fetchone())[0]
                     print(is_public)
                     if n_songs == 4 and is_public:
-                        await search.add_playlist(id=playlist_id, name=playlist_name, username=username, desc=desc)
+                        await search.add_playlist(id=playlist_id, name=playlist_name, username=username, description=description)
                     if n_songs == 1:
-                        await nearest_vectors.insert(f'songs/{user_id}/{playlist_name}', is_public)
+                        await vector_search.insert(playlist_name, user_id, song_name, is_public)
                     else:
-                        await nearest_vectors.update_add_song(f'songs/{user_id}/{playlist_name}', song_name + '.mp3')
+                        await vector_search.update_add_song(playlist_name, user_id, song_name)
                     await bot.send_message(user_id, f'Song with name {song_name} has been added to playlist {playlist_name}.',
                                         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
                                                         InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
                     cur_playlists.pop(message.from_user.id)
                     await state.clear()
                 else:
-                    await message.answer('Preview not available for this track. Please provide a valid Spotify song ID.')
+                    await bot.send_message(user_id, text='Preview not available for this track. Please provide a valid Spotify song ID.',
+                                           reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                                                        InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
     except TypeError:
-        await message.answer("The link of this song is invalid. Please provide a valid song link:")
+        await bot.send_message(user_id, "The link of this song is invalid. Please provide a valid song link:",
+                               reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                                            InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
     except aiomysql.IntegrityError:
-        await message.answer("The song is already in the playlist. Please provide a song which is not present in the playlist:")
+        await bot.send_message(user_id, text="The song is already in the playlist. Please provide a song which is not present in the playlist:",
+                               reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                                            InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
 
 @router_delete_song.callback_query(F.data=='delete_song')
 async def delete_song(callback: CallbackQuery, state):
     username = callback.from_user.username
     user_id = callback.from_user.id
     logger.info("CHOOSE PLAYLIST", extra={'user': username})
-    async with pool.acquire() as conn:
-        async with conn.cursor() as cursor:
-            await cursor.execute(f"SELECT name FROM playlists WHERE user_id='{callback.from_user.id}'")
-            playlists_names = await cursor.fetchall()
-            await cursor.execute(f"SELECT id FROM playlists WHERE user_id='{callback.from_user.id}'")
-            playlists_ids = await cursor.fetchall()
+    
+    cache_key = f'user:{user_id}'
+    result = await retrieve_data(sql_query=f"SELECT id, name FROM playlists WHERE user_id='{callback.from_user.id}'",
+                                 cache_key=cache_key)
+    if isinstance(result, dict):
+        playlists_ids, playlists_names = list(zip(*result['playlists']))
+    elif isinstance(result, list):
+        playlists_ids, playlists_names = result
+        await redis_pool.set(cache_key, json.dumps({"playlists": list(zip(playlists_ids, playlists_names)),
+                                                    "username": username}), ex=1200)
+    else:
+        playlists_ids = []
     if not playlists_ids:
         await bot.send_message(user_id, text="You don't have any playlists in your library, so you can't delete anything. \
                                Please create a playlist to interact with it.",
@@ -544,15 +669,27 @@ async def playlist_list_delete(callback, state):
     logger.info("CHOOSE SONG", extra={'user': username})
     
     playlist_id = " ".join(callback.data.split()[:-1])
-    async with pool.acquire() as conn:
-        async with conn.cursor() as cursor:
-            await cursor.execute(f"SELECT name FROM playlists WHERE id={playlist_id} AND user_id={callback.from_user.id}")
-            playlist_name = (await cursor.fetchone())[0]
-            cur_playlists[callback.from_user.id] = playlist_id
-            await cursor.execute(f"SELECT name FROM songs WHERE playlist_id={playlist_id}")
-            songs_names = await cursor.fetchall()
-            await cursor.execute(f"SELECT id FROM songs WHERE playlist_id={playlist_id}")
-            songs_ids = await cursor.fetchall()
+
+    cache_key = f'playlist_songs:{playlist_id}'
+    result = await retrieve_data(sql_query=f"SELECT id, name FROM songs WHERE playlist_id='{playlist_id}'",
+                                 cache_key=cache_key)
+    if isinstance(result, dict):
+        songs_names = result['names']
+        songs_ids = result['ids']
+    elif isinstance(result, list):
+        songs_ids, songs_names = result 
+        await redis_pool.set(cache_key, json.dumps({"names": songs_names,
+                                                    "ids": songs_ids}), ex=1200)
+    else:
+        songs_ids = []
+    if not songs_ids:
+        await bot.send_message(callback.from_user.id, text="You don't have any songs in this playlist",
+                               reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                                            InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
+        return
+
+    cur_playlists[callback.from_user.id] = playlist_id
+
     await bot.send_message(callback.from_user.id, "Please select a song from playlist which you want to delete:", 
                            reply_markup=(await inline_lists(songs_names, songs_ids, "song_list_delete")))
 
@@ -567,14 +704,31 @@ async def song_list_delete(callback, state):
     cur_playlists.pop(user_id)
     async with pool.acquire() as conn:
         async with conn.cursor() as cursor:
-            await cursor.execute(f"SELECT name FROM songs WHERE id='{song_id}' AND playlist_id={playlist_id}")
-            song_name = (await cursor.fetchone())[0]
-            await cursor.execute(f"SELECT name, is_public FROM playlists WHERE id={playlist_id}")
-            playlist_name, is_public = (await cursor.fetchone())
-            print(playlist_name, is_public)
+            cache_key = f'song:{song_id}'
+
+            if not await redis_pool.exists(cache_key):
+                await cursor.execute(f"SELECT name FROM songs WHERE id='{song_id}' AND playlist_id={playlist_id}")
+                song_name = (await cursor.fetchone())[0]
+                await redis_pool.set(cache_key, json.dumps({"name": song_name}), ex=1200)
+            else:
+                json_info = json.loads(await redis_pool.get(cache_key))
+                song_name = json_info['name']
+
+            cache_key = f'playlist:{playlist_id}'
+            result = await retrieve_data(sql_query=f"SELECT name, is_public, description FROM playlists WHERE id={playlist_id}",
+                                 cache_key=cache_key)
+            if isinstance(result, dict):
+                playlist_name = result['name']
+                is_public = result['is_public']
+            else:
+                playlist_name, is_public, description = result 
+                await redis_pool.set(cache_key, json.dumps({"name": playlist_name,
+                                                            "user_id": user_id,
+                                                            "is_public": is_public,
+                                                            "description": description}), ex=1200)
+                
             await cursor.execute(f'''DELETE FROM songs WHERE name="{song_name}" AND playlist_id={playlist_id}''')
-            await nearest_vectors.update_delete_song(f'songs/{user_id}/{playlist_name}', song_name + '.mp3')
-            os.remove(f"songs/{user_id}/{playlist_name}/{song_name}.mp3")
+            await vector_search.update_delete_song(playlist_name, user_id, song_name)
             await conn.commit()
 
     await bot.send_message(user_id, f"Song {song_name} was deleted successfully.",
@@ -586,12 +740,15 @@ async def ask_for_song_id(callback: CallbackQuery, state):
     username = callback.from_user.username
     user_id = callback.from_user.id
     logger.info("CHOOSE PLAYLIST DELETE", extra={'user': username})
-    async with pool.acquire() as conn:
-        async with conn.cursor() as cursor:
-            await cursor.execute(f"SELECT name FROM playlists WHERE user_id='{callback.from_user.id}'")
-            playlists_names = await cursor.fetchall()
-            await cursor.execute(f"SELECT id FROM playlists WHERE user_id='{callback.from_user.id}'")
-            playlists_ids = await cursor.fetchall()
+    cache_key = f'user:{user_id}'
+    result = await retrieve_data(sql_query=f"SELECT id, name FROM playlists WHERE user_id='{callback.from_user.id}'",
+                                 cache_key=cache_key)
+    if isinstance(result, dict):
+        playlists_ids, playlists_names = list(zip(*result['playlists']))
+    elif isinstance(result, list):
+        playlists_ids, playlists_names = result
+    else:
+        playlists_ids = []
     if not playlists_ids:
         await bot.send_message(user_id, text="You don't have any playlists in your library, so you can't delete anything. \
                                Please create a playlist to interact with it.",
@@ -608,17 +765,30 @@ async def ask_for_song_id(callback: CallbackQuery, state):
     
     user_id = callback.from_user.id
     playlist_id = " ".join(callback.data.split()[:-1])
+    
+    cache_key = f'playlist:{playlist_id}'
+    result = await retrieve_data(sql_query=f"SELECT name, is_public, description FROM playlists WHERE id={playlist_id}",
+                            cache_key=cache_key)
+    if isinstance(result, dict):
+        playlist_name = result['name']
+        is_public = result['is_public']
+    else:
+        print(result)
+        playlist_name, is_public, description = result 
+        await redis_pool.set(cache_key, json.dumps({"name": playlist_name,
+                                                    "user_id": user_id,
+                                                    "is_public": is_public,
+                                                    "description": description}), ex=1200)
     async with pool.acquire() as conn:
         async with conn.cursor() as cursor:
-            await cursor.execute(f"SELECT name, is_public FROM playlists WHERE id={playlist_id}")
-            playlist_name, is_public = (await cursor.fetchone())
             await cursor.execute(f"DELETE FROM playlists WHERE id={playlist_id}")
-            shutil.rmtree(f"songs/{user_id}/{playlist_name}")
             await conn.commit()
+            await redis_pool.delete(cache_key)
+    cache_key = f'user:{user_id}'
     if is_public:
         await search.delete_playlist(id=playlist_id)
     try:
-        await nearest_vectors.delete_playlist(f'songs/{user_id}/{playlist_name}')
+        await vector_search.delete_playlist(playlist_name, user_id)
     except IndexError:
         pass
     await bot.send_message(user_id, f"Playlist {playlist_name} was deleted successfully.",
@@ -630,42 +800,64 @@ async def ask_for_playlist_name(callback: CallbackQuery, state):
     username = callback.from_user.username
     user_id = callback.from_user.id
     logger.info("CHOOSE PLAYLIST", extra={'user': username})
-    async with pool.acquire() as conn:
-        async with conn.cursor() as cursor:
-            await cursor.execute(f"SELECT name, is_public FROM playlists WHERE user_id='{callback.from_user.id}'")
-            try:
-                playlists_names, is_public = zip(*(await cursor.fetchall()))
-            except ValueError:
-                await bot.send_message(user_id, text="You don't have any playlists. Please create a one to add songs to it.",
-                                       reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                                                    InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
-            print(playlists_names, is_public)
-            is_public_str_list = ['public' if is_public[i] else 'private' for i in range(len(is_public))]
-            playlists_names = [(name + f" ({is_public_str})", ) for name, is_public_str in zip(playlists_names, is_public_str_list)]
-            await cursor.execute(f"SELECT id FROM playlists WHERE user_id='{callback.from_user.id}'")
-            playlists_ids = await cursor.fetchall()
+    cache_key = f'user:{user_id}'
+    result = await retrieve_data(sql_query=f"SELECT id, name FROM playlists WHERE user_id='{callback.from_user.id}'",
+                                 cache_key=cache_key)
+    if isinstance(result, dict):
+        playlists_ids, playlists_names = list(zip(*result['playlists']))
+    elif isinstance(result, list):
+        playlists_ids, playlists_names = result
+        await redis_pool.set(cache_key, json.dumps({"playlists": list(zip(playlists_ids, playlists_names)),
+                                                    "username": username}), ex=1200)
+    else:
+        playlists_ids = []
+    if not playlists_ids:
+        await bot.send_message(user_id, text="You don't have any playlists in library. Please create a one to start adding songs to it.",
+                               reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                                        InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
+        return
     await bot.send_message(user_id, "Choose the playlist:", 
                            reply_markup=(await inline_lists(playlists_names, playlists_ids, 'get_songs_pl_chosen')))
 
 @router_get.callback_query(F.data.endswith(' get_songs_pl_chosen'))
 async def get_songs(callback: CallbackQuery, state):
+    user_id = callback.from_user.id
     username = callback.from_user.username
     logger.info("GET SONGS", extra={'user': username})
     
     playlist_id = " ".join(callback.data.split()[:-1])
+    cache_key = f'playlist_songs:{playlist_id}'
+    result = await retrieve_data(sql_query=f"SELECT id, name FROM songs WHERE playlist_id='{playlist_id}'",
+                                 cache_key=cache_key)
+    if isinstance(result, dict):
+        songs_names = result['names']
+    elif isinstance(result, list):
+        songs_ids, songs_names = result 
+        await redis_pool.set(cache_key, json.dumps({"names": songs_names,
+                                                    "ids": songs_ids}), ex=1200)
+    else:
+        songs_ids = []
+    if not songs_ids:
+        await bot.send_message(user_id, text="This playlist is empty. Please add some songs to interact with them.",
+                               reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                                            InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
+        return
     async with pool.acquire() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute(f"SELECT name FROM songs WHERE playlist_id='{playlist_id}'")
             songs_names = await cursor.fetchall()
-            await cursor.execute(f"SELECT name FROM playlists WHERE id='{playlist_id}'")
-            playlist_name = (await cursor.fetchone())[0]
-    if songs_names:
-        reply = f"Here are your songs from {playlist_name} playlist:\n"
-    else:
-        reply = f"You have no songs in this playlist."
+            cache_key = f'playlist:{playlist_id}'
+            result = await retrieve_data(sql_query=f"SELECT name FROM playlists WHERE id='{playlist_id}'",
+                                         cache_key=cache_key)
+            if isinstance(result, dict):
+                playlist_name = result['name']
+            elif isinstance(result, list):
+                playlist_name = result 
+    
+    reply = f"Here are your songs from {playlist_name} playlist:\n"
     for i, song in enumerate(songs_names):
         reply += f"{i + 1}. " + song[0] + "\n"
-    await bot.send_message(callback.from_user.id, reply,
+    await bot.send_message(user_id, reply,
                            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
                                InlineKeyboardButton(text='Back to menu', callback_data='menu')]]))
 
@@ -798,14 +990,13 @@ async def quiz(callback: CallbackQuery, state):
                     info = await rag_genius.retrieve_info(correct_option)
                     description = info['description']
                     lyrics = info['lyrics']
-                    prompt = f'''Based on this description and lyrics of the song generate a question for a music quiz in a json format:\
-                    Description: {description}\
-                    Lyrics: {lyrics}
+                    prompt = f'''Based on this description and lyrics of the song generate a question for a music quiz in a json format:
+                    \nDescription: {description}\nLyrics: {lyrics}
                     '''
                     global counter
                     counter += 1
                     while True:
-                        model = 'QuantFactory/Meta-Llama-3-8B-GGUF/Meta-Llama-3-8B.Q2_K.gguf'
+                        model = 'lmstudio-community/Phi-3.5-mini-instruct-GGUF/Phi-3.5-mini-instruct-Q6_K.gguf'
                         # if counter % 2 == 0:
                         #     model += ':2'
                         question_str = await generate_question(prompt, 'http://localhost:1234/v1/chat/completions', model)
@@ -851,11 +1042,13 @@ async def quiz_share(callback: CallbackQuery, state):
     user_id = callback.from_user.id
     playlist_id = cur_playlists[user_id]
     token = await generate_unique_token()
-    async with pool.acquire() as conn:
-        async with conn.cursor() as cursor:
-            await cursor.execute(f'''INSERT INTO quiz_shares(token, user_id, playlist_id, quiz_type, max_points, seed) 
-                                VALUES('{token}', '{user_id}', {playlist_id}, '{quiz_type[user_id]}', {max_points[user_id]}, {users_seeds[user_id]})''')
-            await conn.commit()
+    cache_key = f'quiz_share:{token}'
+    await redis_pool.set(cache_key, json.dumps({"user_id": user_id, 
+                                                "playlist_id": playlist_id,
+                                                "max_points":  max_points[user_id],
+                                                "quiz_type": quiz_type[user_id],
+                                                "seed": users_seeds[user_id]}), ex=1200)
+
     share_url = f"https://t.me/guess_thee_music_bot?start={token}"
     await bot.send_message(user_id, text=f"Here is your link for the quiz which you can share with your friends:")
     await bot.send_message(user_id, text=share_url, 
@@ -900,7 +1093,7 @@ async def other_playlist_got_amount(message, state):
                 offset = None
                 if is_public:
                     offset = 1
-                objects = (await nearest_vectors.search(f'songs/{user_id}/{playlist_name}', offset=offset, n_questions=int(message.text))).objects
+                objects = (await vector_search.search(f'songs/{user_id}/{playlist_name}', offset=offset, n_questions=int(message.text))).objects
                 print(objects)
                 playlists_names = []
                 playlists_ids = []

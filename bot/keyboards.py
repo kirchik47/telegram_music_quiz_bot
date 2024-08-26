@@ -1,5 +1,13 @@
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+async def inline_lists(lst, ids, param, menu=True):
+    keyboard = InlineKeyboardBuilder()
+    for i, inst in enumerate(lst):
+        keyboard.button(text=inst, callback_data=f'{ids[i]} {param}')
+    keyboard.button(text='Back to menu', callback_data='menu')
+    keyboard = keyboard.adjust(*[1]*len(lst))
+    return keyboard.as_markup()
 
 main = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text='Start "Guess the melody" quiz', callback_data='melody quiz_amount')],
