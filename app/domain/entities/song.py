@@ -6,3 +6,6 @@ class Song:
             'spotify_url': spotify_url
         }
     
+    def to_dict(self):
+        return self.data
+    
