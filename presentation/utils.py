@@ -5,12 +5,15 @@ from spotipy import Spotify, SpotifyClientCredentials
 import os
 from redis.asyncio import Redis
 import secrets
+import aiofiles
+import logging
 
+
+logger = logging.getLogger('utils')
 
 CLIENT_ID = os.getenv('CLIENT_ID')
 CLIENT_SECRET = os.getenv('CLIENT_SECRET')
 sp = Spotify(auth_manager=SpotifyClientCredentials(client_id=CLIENT_ID, client_secret=CLIENT_SECRET))
-redis_pool = Redis()
 
 async def get_song_preview_url(song_id):
     track_info = sp.track(song_id)
@@ -30,18 +33,22 @@ async def extract_spotify_track_id(url):
     else:
         return None
 
-async def retrieve_data(pool, sql_query, cache_key):
-    if not await redis_pool.exists(cache_key): 
-        async with pool.acquire() as conn:
-            async with conn.cursor() as cursor:
-                await cursor.execute(sql_query)
-                result = list(zip(*(await cursor.fetchall())))
-    else:
-        result = json.loads(await redis_pool.get(cache_key))
-    if isinstance(result, list):
-        if len(result[0]) == 1:
-            result = [field[0] for field in result]
-    return result if result else None
-
 async def generate_unique_token():
     return secrets.token_hex(32)
+
+async def get_instruction():
+    instruction = ""
+    async with aiofiles.open('instruction.txt', 'r') as f:
+        lines = f.readlines()
+        for line in lines:
+            instruction += line
+    return instruction
+
+def error_handler(func):
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            logging.error(f"Error in {func.__name__}: {e}")
+            return "Something went wrong. Please try again later."
+    return wrapper

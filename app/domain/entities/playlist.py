@@ -11,11 +11,11 @@ class Playlist:
     def update(self, field, value):
         self.data[field] = value
     
-    def to_dict(self):
+    def to_dict(self) -> dict:
         return self.data
     
     @classmethod
-    def from_dict(cls, id, data_dict):
+    def from_dict(cls, id, data_dict) -> 'Playlist':
         playlist = cls(id)
         playlist.data = data_dict
         return playlist

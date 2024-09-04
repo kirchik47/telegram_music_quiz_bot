@@ -1,7 +1,7 @@
 from entities.user import User
 from abc import ABC, abstractmethod
 
-class UserRepository(ABC):
+class UserRepositoryInterface(ABC):
     @abstractmethod
     def get_by_id(self, user_id: str) -> User:
         raise NotImplementedError
