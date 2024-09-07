@@ -2,9 +2,9 @@ from entities.song import Song
 from abc import ABC, abstractmethod
 
 
-class SongRepository(ABC):
+class QuizRepoInterface(ABC):
     @abstractmethod
-    def get_by_song_id_playlist_id(self, song_id: str, playlist_id: int) -> Song:
+    def get(self, song_id: str, playlist_id: int) -> Song:
         raise NotImplementedError
     
     @abstractmethod
@@ -12,7 +12,7 @@ class SongRepository(ABC):
         raise NotImplementedError
     
     @abstractmethod
-    def delete_by_song_id_playlist_id(self, song_id: str, playlist_id: int) -> Song:
+    def delete(self, song_id: str, playlist_id: int) -> Song:
         raise NotImplementedError
     
     
