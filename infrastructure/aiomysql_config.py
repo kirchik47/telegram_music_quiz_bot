@@ -22,7 +22,7 @@ class MySQLPool:
     async def close_pool(self):
         self.pool.close()
         await self.pool.wait_closed()
-
+        
     async def get_connection(self):
         return await self.pool.acquire()
 

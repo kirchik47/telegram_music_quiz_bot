@@ -1,7 +1,7 @@
-from app.domain.repositories_interfaces.user_repository import UserRepositoryInterface
+from app.domain.repositories_interfaces.user_repo import UserRepoInterface
 
 
 class CreatePlaylistUseCase:
-    def __init__(self, user_repository: UserRepositoryInterface):
-        self.user_repository = user_repository
+    def __init__(self, user_repo: UserRepoInterface):
+        self.user_repo = user_repo
     

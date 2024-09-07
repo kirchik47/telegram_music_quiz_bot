@@ -1,45 +1,47 @@
-# infrastructure/repositories/mysql_playlist_repository.py
-from app.domain.repositories_interfaces.playlist_repository import PlaylistRepositoryInterface
+# infrastructure/repositories/mysql_playlist_repo.py
+from app.domain.repositories_interfaces.playlist_repo import PlaylistRepoInterface
 from app.domain.entities.playlist import Playlist
 from infrastructure.aiomysql_config import MySQLPool
-from app.domain.entities.song import Song
 
 
-class MySQLPlaylistRepository(PlaylistRepositoryInterface):
+class MySQLPlaylistRepo(PlaylistRepoInterface):
     def __init__(self, pool: MySQLPool):
         self.pool = pool
 
-    async def get_playlist_by_name(self, user_id: int, name: str) -> Playlist:
+    async def get(self, playlist: Playlist) -> Playlist:
         async with self.pool.get_connection() as conn:
             async with conn.cursor() as cursor:
-                await cursor.execute("SELECT * FROM playlists WHERE user_id=%s AND name=%s", (user_id, name))
+                await cursor.execute("SELECT * FROM playlists WHERE id=%s", (playlist.id, ))
                 result = await cursor.fetchone()
                 if result:
-                    playlist = Playlist(name=result['name'])
-                    await cursor.execute("SELECT * FROM songs WHERE playlist_id=%s", (result['id'],))
-                    songs = await cursor.fetchall()
-                    for song in songs:
-                        playlist.add_song(Song(title=song['title'], artist=song['artist']))
-                    return playlist
+                    keys = playlist.model_fields.keys()
+                    result_dict = {}
+                    for i, key in enumerate(keys):
+                        result_dict[key] = result[i]
+                    return Playlist.model_validate(result_dict)
                 return None
 
-    async def save_playlist(self, user_id: int, playlist: Playlist) -> None:
+    async def save(self, playlist: Playlist) -> None:
         async with self.pool.get_connection() as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute(
-                    "INSERT INTO playlists (user_id, name) VALUES (%s, %s) ON DUPLICATE KEY UPDATE name=%s",
-                    (user_id, playlist.name, playlist.name)
+                    '''INSERT INTO playlists (name, user_id, is_public, description) VALUES (%s, %s, %s, %s)''',
+                    (playlist.name, playlist.user_id, playlist.is_public, playlist.description)
                 )
-                playlist_id = conn.insert_id()
-                for song in playlist.songs:
-                    await cursor.execute(
-                        "INSERT INTO songs (playlist_id, title, artist) VALUES (%s, %s, %s)",
-                        (playlist_id, song.title, song.artist)
-                    )
-                await conn.commit()
 
-    async def delete_playlist(self, user_id: int, name: str) -> None:
+                await conn.commit()
+    async def update(self, playlist: Playlist) -> None:
         async with self.pool.get_connection() as conn:
             async with conn.cursor() as cursor:
-                await cursor.execute("DELETE FROM playlists WHERE user_id=%s AND name=%s", (user_id, name))
+                await cursor.execute(
+                    '''UPDATE playlists SET name=%s, user_id=%s, is_public=%s, description=%s WHERE id=%s''', 
+                    (playlist.name, playlist.user_id, playlist.is_public, playlist.description, playlist.id)
+                )
+                await conn.commit()
+
+    async def delete(self, playlist: Playlist) -> None:
+        async with self.pool.get_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("DELETE FROM playlists WHERE name=%s AND user_id=%s", 
+                                     (playlist.name, playlist.user_id))
                 await conn.commit()
