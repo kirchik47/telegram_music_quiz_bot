@@ -1,4 +1,4 @@
-from entities.playlist import Playlist
+from app.domain.entities.playlist import Playlist
 from abc import ABC, abstractmethod
 
 

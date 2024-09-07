@@ -1,4 +1,4 @@
-from entities.user import User
+from app.domain.entities.user import User
 from abc import ABC, abstractmethod
 
 class UserRepoInterface(ABC):
