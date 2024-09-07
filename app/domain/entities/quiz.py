@@ -1,28 +1,17 @@
-class Quiz:
-    def __init__(self, id):
-        self.data = {
-            'id': id,
-            'username': None,
-            'cur_playlists': [],
-            'songs_left': [],
-            'questions_left': None,
-            'max_amount': None,
-            'points': None,
-            'max_points': None,
-            'correct_options': [],
-            'inviters_info': [],
-            'songs_all': [],
-            'quiz_type': None,
-        }
+from pydantic import BaseModel
+from typing import Optional
+
+
+class Quiz(BaseModel):
+    id: str
+    user_id: Optional[str] = None
+    songs_left: Optional[list[str]] = None
+    points: Optional[int] = None
+    quiz_type: Optional[str] = None
+    questions_left: Optional[int] = None
+    max_points: Optional[int] = None
+    inviters_info: Optional[list] = None
     
     def update(self, field, value):
-        self.data[field] = value
-
-    def to_dict(self) -> dict:
-        return self.data
-    
-    @classmethod
-    def from_dict(cls, id, data_dict) -> 'Quiz':
-        user = cls(id)
-        user.data = data_dict
-        return user
+        if hasattr(self, field):
+            setattr(self, field, value)

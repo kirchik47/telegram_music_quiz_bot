@@ -1,11 +1,13 @@
-class Song:
-    def __init__(self, id, title, spotify_url):
-        self.data = {
-            'id': id,
-            'title': title,
-            'spotify_url': spotify_url
-        }
+from pydantic import BaseModel
+from typing import Optional
+
+
+class Song(BaseModel):
+    id: str
+    title: Optional[str] = None
+    playlist_id: int
     
-    def to_dict(self) -> dict:
-        return self.data
+    def update(self, field, value):
+        if hasattr(self, field):
+            setattr(self, field, value)
     

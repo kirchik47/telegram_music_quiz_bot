@@ -2,3 +2,6 @@ __pycache__
 *.log
 *.env
 *.cache
+*.sql
+*.vscode
+test.py
