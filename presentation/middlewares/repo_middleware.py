@@ -8,4 +8,4 @@ class RepoMiddleware(BaseMiddleware):
     
     async def __call__(self, handler, event, data: dict):
         data['repo_service'] = self.repo_service
-        return await handler(event)
+        return await handler(event, data)

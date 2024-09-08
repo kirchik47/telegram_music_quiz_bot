@@ -11,8 +11,8 @@ import logging
 
 logger = logging.getLogger('utils')
 
-CLIENT_ID = os.getenv('CLIENT_ID')
-CLIENT_SECRET = os.getenv('CLIENT_SECRET')
+CLIENT_ID = os.getenv('SPOTIFY_CLIENT_ID')
+CLIENT_SECRET = os.getenv('SPOTIFY_CLIENT_SECRET')
 sp = Spotify(auth_manager=SpotifyClientCredentials(client_id=CLIENT_ID, client_secret=CLIENT_SECRET))
 
 async def get_song_preview_url(song_id):
@@ -38,8 +38,8 @@ async def generate_unique_token():
 
 async def get_instruction():
     instruction = ""
-    async with aiofiles.open('instruction.txt', 'r') as f:
-        lines = f.readlines()
+    async with aiofiles.open('presentation/instruction.txt', 'r') as f:
+        lines = await f.readlines()
         for line in lines:
             instruction += line
     return instruction

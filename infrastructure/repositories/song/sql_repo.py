@@ -8,7 +8,7 @@ class MySQLSongRepo(SongRepoInterface):
         self.pool = pool
 
     async def get(self, song: Song) -> Song:
-        async with self.pool.get_connection() as conn:
+        async with await self.pool.get_connection() as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute("SELECT * FROM songs WHERE id=%s AND playlist_id=%s", (song.id, song.playlist_id))
 
@@ -22,7 +22,7 @@ class MySQLSongRepo(SongRepoInterface):
                 return None
 
     async def save(self, song: Song) -> None:
-        async with self.pool.get_connection() as conn:
+        async with await self.pool.get_connection() as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute(
                     '''INSERT INTO songs (id, title, playlist_id) VALUES (%s, %s, %s)''',
@@ -32,7 +32,7 @@ class MySQLSongRepo(SongRepoInterface):
                 await conn.commit()
     
     async def delete(self, song: Song) -> None:
-        async with self.pool.get_connection() as conn:
+        async with await self.pool.get_connection() as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute("DELETE FROM songs WHERE id=%s AND playlist_id=%s", 
                                      (song.id, song.playlist_id))

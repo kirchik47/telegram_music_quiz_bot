@@ -2,9 +2,9 @@ import aiomysql
 import asyncio
 
 class MySQLPool:
-    def __init__(self, host: str, port: int, user: str, password: str, db: str):
+    def __init__(self, host: str, port: str, user: str, password: str, db: str):
         self.host = host
-        self.port = port
+        self.port = int(port)
         self.user = user
         self.password = password
         self.db = db
@@ -24,7 +24,7 @@ class MySQLPool:
         await self.pool.wait_closed()
         
     async def get_connection(self):
-        return await self.pool.acquire()
+        return self.pool.acquire()
 
     async def release_connection(self, connection):
         self.pool.release(connection)

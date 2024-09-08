@@ -2,9 +2,9 @@ from redis.asyncio import Redis
 
 
 class RedisPool:
-    def __init__(self, host: str, port: int, db: int):
+    def __init__(self, host: str, port: str, db: int):
         self.host = host
-        self.port = port
+        self.port = int(port)
         self.db = db
         self.pool = None
 

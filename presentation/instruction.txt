@@ -1,0 +1,36 @@
+Instruction:
+*_Start "Guess the melody" quiz_*
+Starts a quiz based on your chosen playlist with specified amount of questions by you, where each question is a preview of a song\. 
+You will have 4 options of titles of the song with 1 correct answer and unlimited time to answer and unlimited tries to listen to preview\.
+
+*_Start "Facts about song" quiz_*
+Starts a quiz based on your chosen playlist with specified amount of questions by you, where each question will be a certain question 
+related to this song\. It can be anything, from guessing the title of album containing the song, lyrics related question, some fact 
+about singer or band, etc\. Works the same as "Guess the melody" quiz\.
+
+*_Add song_*
+Adds a new song to your chosen playlist\. You will be prompted to provide spotify link to the song, which you can get by clicking 
+"Share" \-\-\> "Copy Song link"\. The added song will then appear in your playlist\.
+
+*_Delete song_*
+Removes a song from your chosen playlist\. You will be given a list of all songs in the playlist, from which you can select the one 
+to delete\.
+
+*_Get songs list_*
+Displays a list of all songs currently in your chosen playlist\. This list will include details such as the song title and artist\.
+
+*_Create new playlist_*
+Creates a new playlist\. You will be asked to provide a name for the playlist, then description and finally a visibility of it\. 
+Then proceed to add songs\. This playlist will be stored for future use in quizzes or other operations\.
+
+*_Delete playlist_*
+Permanently deletes a chosen playlist\. You will be given a list of all existing playlists to select the one you wish to delete\.
+
+*_Search other playlists_*
+Allows you to search for and explore playlists created by others from a public database\. You can filter by name, description, 
+or username of the creator by simply typing what you want\.
+
+*_Edit playlist information_*
+Lets you modify the details of your chosen playlist\. You can rename the playlist, update the description, or change the visibility 
+to public or vice versa\.
+
