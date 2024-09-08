@@ -1,18 +1,17 @@
-from app.domain.entities.song import Song
+from app.domain.entities.quiz import Quiz
 from abc import ABC, abstractmethod
-
 
 class QuizRepoInterface(ABC):
     @abstractmethod
-    def get(self, song_id: str, playlist_id: int) -> Song:
+    def get(self, quiz: Quiz) -> Quiz:
         raise NotImplementedError
     
     @abstractmethod
-    def save(self, fields: dict) -> Song:
+    def save(self, quiz: Quiz) -> Quiz:
         raise NotImplementedError
     
     @abstractmethod
-    def delete(self, song_id: str, playlist_id: int) -> Song:
+    def delete(self, quiz: Quiz) -> Quiz:
         raise NotImplementedError
     
     
