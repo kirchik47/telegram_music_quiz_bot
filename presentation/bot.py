@@ -17,7 +17,7 @@ from routers import (main_router, router_add_song, router_create_playlist, route
 from aiogram import Bot, Dispatcher
 from config.main_config import TG_TOKEN
 import asyncio
-
+from config import logging_config
 import handlers
 
 

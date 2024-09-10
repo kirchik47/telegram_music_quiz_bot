@@ -2,6 +2,13 @@ import logging
 import logging.config
 
 
+class UserFilter(logging.Filter):
+    def filter(self, record):
+        if not hasattr(record, 'user'):
+            record.user = 'SYSTEM'  # Set default user if not provided
+        return True
+    
+
 logging_config = {
     'version': 1,
     'disable_existing_loggers': False,
@@ -10,17 +17,24 @@ logging_config = {
             'format': '%(asctime)s - %(name)s - %(levelname)s - %(user)s - %(message)s'
         },
     },
+    'filters': {
+        'user_filter': {
+            '()': UserFilter,
+        },
+    },
     'handlers': {
         'file': {
             'level': 'INFO',
             'class': 'logging.FileHandler',
-            'filename': 'app.log',
+            'filename': 'C:\\Users\\kirch\\pythonProject\\music_bot\\telegram_music_quiz_bot\\app.log',
             'formatter': 'standard',
+            'filters': ['user_filter']
         },
         'console': {
             'level': 'INFO',
             'class': 'logging.StreamHandler',
             'formatter': 'standard',
+            'filters': ['user_filter']
         },
     },
     'loggers': {

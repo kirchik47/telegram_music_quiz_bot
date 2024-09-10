@@ -45,10 +45,10 @@ async def get_instruction():
     return instruction
 
 def error_handler(func):
-    def wrapper(*args, **kwargs):
+    async def wrapper(*args, **kwargs):
         try:
-            return func(*args, **kwargs)
+            return await func(*args, **kwargs)
         except Exception as e:
-            logging.error(f"Error in {func.__name__}: {e}")
+            logger.error(f"Error in {func.__name__}: {e}", exc_info=True)
             return "Something went wrong. Please try again later."
     return wrapper

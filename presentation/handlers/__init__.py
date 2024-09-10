@@ -1,1 +1,3 @@
 from presentation.handlers.start_handlers import start
+from presentation.handlers.instruction_handler import instruction
+from presentation.handlers.menu_handler import menu
