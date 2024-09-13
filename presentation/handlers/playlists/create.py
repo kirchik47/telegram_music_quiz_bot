@@ -1,14 +1,15 @@
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, Message
 from aiogram.fsm.context import FSMContext
-from aiogram.enums import ParseMode
 from aiogram import F
-from app.use_cases.playlists.playlist_use_cases import PlaylistUseCase
+from app.use_cases.playlists.playlist_use_cases import PlaylistUseCases
+from app.use_cases.users.user_use_cases import UserUseCases
 import logging
 from routers import router_create_playlist
 from presentation.state_form import Form
 import presentation.keyboards as kb
 from infrastructure.services.repo_service import RepoService
 from app.domain.entities.playlist import Playlist
+from app.domain.entities.user import User
 from presentation.utils import generate_playlist_id, error_handler
 
 
@@ -78,12 +79,20 @@ async def finalize_playlist_creation(callback: CallbackQuery, state: FSMContext,
     description = data['description']
     visibility = 1 if callback.data.endswith('public') else 0
 
-    sql_repo = repo_service.sql_playlist_repo
-    redis_repo = repo_service.redis_playlist_repo
+    # Getting repos from the service from the middleware
+    sql_playlist_repo = repo_service.sql_playlist_repo
+    redis_playlist_repo = repo_service.redis_playlist_repo
+
+    sql_user_repo = repo_service.sql_user_repo
+    redis_user_repo = repo_service.redis_user_repo
+    # Generating 16 digit hash as playlist id
     playlist_id = await generate_playlist_id(playlist_name, user_id)
+
     playlist = Playlist(id=playlist_id, name=playlist_name, user_id=user_id, is_public=visibility, description=description)
-    use_case =  PlaylistUseCase(sql_repo=sql_repo, redis_repo=redis_repo)
-    res = await use_case.create(playlist)
+    playlist_use_cases =  PlaylistUseCases(sql_repo=sql_playlist_repo, redis_repo=redis_playlist_repo)
+    
+    # If returns True, playlist with this name was already present in the database, if None then not
+    res = await playlist_use_cases.create(playlist)
     if res:
         await callback.bot.send_message(
             user_id,
@@ -91,6 +100,18 @@ async def finalize_playlist_creation(callback: CallbackQuery, state: FSMContext,
             reply_markup=await kb.inline_lists([], [], '')
         )
         return
+    
+    user_use_cases = UserUseCases(sql_repo=sql_user_repo, redis_repo=redis_user_repo)
+    
+    user = User(id=user_id)
+    user = await user_use_cases.get(user)
+
+    if user.playlists is None:
+        user.playlists = [playlist]
+    else:
+        user.playlists.append(playlist)
+    
+    await user_use_cases.update_playlists(user)
     await state.clear()
     await callback.bot.send_message(
         user_id, 

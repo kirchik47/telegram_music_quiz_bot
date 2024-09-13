@@ -1,6 +1,7 @@
 from app.domain.repositories_interfaces.song_repo import SongRepoInterface
 from infrastructure.aiomysql_config import MySQLPool
 from app.domain.entities.song import Song
+from app.domain.entities.playlist import Playlist
 
 
 class MySQLSongRepo(SongRepoInterface):
@@ -37,3 +38,14 @@ class MySQLSongRepo(SongRepoInterface):
                 await cursor.execute("DELETE FROM songs WHERE id=%s AND playlist_id=%s", 
                                      (song.id, song.playlist_id))
                 await conn.commit()
+    
+    async def get_by_playlist(self, playlist: Playlist) -> tuple:
+        async with await self.pool.get_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT * FROM songs WHERE playlist_id=%s", (playlist.id,))
+                result = await cursor.fetchall()
+                print(result)
+                return [Song(id=song[0],
+                             title=song[1],
+                             playlist_id=song[2],
+                        ) for song in result]

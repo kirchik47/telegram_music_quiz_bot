@@ -30,14 +30,15 @@ async def main():
     redis_pool = RedisPool(host=REDIS_HOST, port=REDIS_PORT, db=0)
     await sql_pool.create_pool()
     await redis_pool.create_pool()
-    sql_playlist_repo = MySQLPlaylistRepo(sql_pool)
+    sql_song_repo = MySQLSongRepo(sql_pool)
+    redis_song_repo = RedisSongRepo(redis_pool)
+
+    sql_playlist_repo = MySQLPlaylistRepo(sql_pool, sql_song_repo)
     redis_playlist_repo = RedisPlaylistRepo(redis_pool)
 
     sql_user_repo = MySQLUserRepo(sql_pool, sql_playlist_repo)
     redis_user_repo = RedisUserRepo(redis_pool)
     
-    sql_song_repo = MySQLSongRepo(sql_pool)
-    redis_song_repo = RedisSongRepo(redis_pool)
 
     redis_quiz_repo = RedisQuizRepo(redis_pool)
 

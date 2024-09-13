@@ -3,18 +3,22 @@ from app.domain.repositories_interfaces.playlist_repo import PlaylistRepoInterfa
 from app.domain.entities.playlist import Playlist
 from app.domain.entities.user import User
 from infrastructure.aiomysql_config import MySQLPool
+from app.domain.repositories_interfaces.song_repo import SongRepoInterface
 from aiomysql import IntegrityError
 
 
 class MySQLPlaylistRepo(PlaylistRepoInterface):
-    def __init__(self, pool: MySQLPool):
+    def __init__(self, pool: MySQLPool, song_repo: SongRepoInterface):
         self.pool = pool
+        self.song_repo = song_repo
 
     async def get(self, playlist: Playlist) -> Playlist:
         async with await self.pool.get_connection() as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute("SELECT * FROM playlists WHERE id=%s", (playlist.id, ))
-                result = await cursor.fetchone()
+                result = list(await cursor.fetchone())
+                result.append(await self.song_repo.get_by_playlist(playlist))
+                print(result)
                 if result:
                     keys = playlist.model_fields.keys()
                     result_dict = {}
@@ -56,5 +60,10 @@ class MySQLPlaylistRepo(PlaylistRepoInterface):
             async with conn.cursor() as cursor:
                 await cursor.execute("SELECT * FROM playlists WHERE user_id=%s", (user.id,))
                 result = await cursor.fetchall()
-                return result
+                print(result)
+                return [Playlist(id=playlist[0],
+                                 name=playlist[1],
+                                 user_id=playlist[2],
+                                 is_public=playlist[3],
+                                 description=playlist[4]) for playlist in result]
             

@@ -16,7 +16,7 @@ main = InlineKeyboardMarkup(inline_keyboard=[
      InlineKeyboardButton(text='Delete song', callback_data='delete_song')],
     [InlineKeyboardButton(text='Get songs list', callback_data='get_songs'), 
      InlineKeyboardButton(text='Create new playlist', callback_data='create_playlist')],
-    [InlineKeyboardButton(text='Delete playlist', callback_data='delete_playlist'), 
+    [InlineKeyboardButton(text='Delete playlist', callback_data='choose_playlist_delete'), 
      InlineKeyboardButton(text='Search other playlists', callback_data='search')],
     [InlineKeyboardButton(text='Edit playlist information', callback_data='edit_playlist'),
      InlineKeyboardButton(text='Instruction', callback_data='instruction')]

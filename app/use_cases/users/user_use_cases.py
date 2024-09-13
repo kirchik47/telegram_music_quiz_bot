@@ -25,3 +25,13 @@ class UserUseCases:
             # Anyways save the user in redis cache because he is not present there
             await self.redis_repo.save(user)
     
+    async def get(self, user: User) ->  User:
+        # Check if the user exists in the redis cache
+        redis_info = await self.redis_repo.get(user)
+        if redis_info:
+            return redis_info
+        return await self.sql_repo.get(user)
+
+    async def update_playlists(self, user: User) -> None:
+        await self.redis_repo.save(user)
+

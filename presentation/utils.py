@@ -9,6 +9,7 @@ import aiofiles
 import logging
 import hashlib
 import time
+import presentation.keyboards as kb
 
 
 logger = logging.getLogger('utils')
@@ -57,8 +58,12 @@ def error_handler(func):
         try:
             return await func(*args, **kwargs)
         except Exception as e:
+            obj = args[0]
+            user_id = obj.from_user.id
             logger.error(f"Error in {func.__name__}: {e}", exc_info=True)
-            return "Something went wrong. Please try again later."
+            await obj.bot.send_message(user_id,
+                                       text="Something went wrong. Please try again later.",
+                                       reply_markup=await kb.inline_lists([], [], ''))
     return wrapper
 
 async def generate_quiz_id(playlist_name, user_id):

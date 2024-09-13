@@ -2,7 +2,7 @@ from app.domain.repositories_interfaces.playlist_repo import PlaylistRepoInterfa
 from app.domain.entities.playlist import Playlist
 
 
-class PlaylistUseCase:
+class PlaylistUseCases:
     def __init__(self, sql_repo: PlaylistRepoInterface, redis_repo: PlaylistRepoInterface):
         self.sql_repo = sql_repo
         self.redis_repo = redis_repo
@@ -23,7 +23,7 @@ class PlaylistUseCase:
         if redis_info:
             return redis_info
         return await self.sql_repo.get(playlist)
-
+    
     async def update(self, playlist: Playlist) -> None:
         await self.sql_repo.update(playlist)
         await self.redis_repo.save(playlist)
