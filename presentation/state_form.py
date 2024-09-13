@@ -11,7 +11,7 @@ class Form(StatesGroup):
     waiting_for_amount = State()
     waiting_for_description = State()
     waiting_for_search_query = State()
+    waiting_for_playlist_name_edit = State()
+    waiting_for_playlist_description_edit = State()
     search_got_amount = State()
-    edit_playlist_name = State()
-    edit_playlist_desc= State()
     

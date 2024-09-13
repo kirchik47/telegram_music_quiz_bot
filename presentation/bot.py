@@ -12,7 +12,7 @@ from config.main_config import DB_HOST, DB_NAME, DB_USER, DB_PASSWORD, DB_PORT, 
 from middlewares.repo_middleware import RepoMiddleware
 from infrastructure.services.repo_service import RepoService
 from routers import (main_router, router_add_song, router_create_playlist, router_delete_song, 
-                     router_delete_playlist, router_quiz, router_get, router_search, router_edit)
+                     router_delete_playlist, router_quiz, router_get, router_search, router_edit_playlist)
 
 from aiogram import Bot, Dispatcher
 from config.main_config import TG_TOKEN
@@ -55,7 +55,7 @@ async def main():
     repo_middleware = RepoMiddleware(repo_service)
 
     routers = [router_add_song, router_search, router_create_playlist, router_delete_playlist,
-            router_delete_song, router_quiz, router_get, router_edit]
+            router_delete_song, router_quiz, router_get, router_edit_playlist]
     
     main_router.include_routers(*routers)
     

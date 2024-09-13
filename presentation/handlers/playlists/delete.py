@@ -55,7 +55,7 @@ async def finalize_playlist_deletion(callback: CallbackQuery, state: FSMContext,
     logger.info("DELETING PLAYLIST", extra={'user': username})
 
     # Extract the playlist ID from the callback data
-    playlist_id = " ".join(callback.data.split()[:-1])
+    playlist_id = " ".join(callback.data.split()[0])
 
     # Getting repos from the service from the middleware
     sql_playlist_repo = repo_service.sql_playlist_repo
