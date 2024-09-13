@@ -3,6 +3,7 @@ from app.domain.repositories_interfaces.playlist_repo import PlaylistRepoInterfa
 from app.domain.entities.playlist import Playlist
 from app.domain.entities.user import User
 from infrastructure.aiomysql_config import MySQLPool
+from aiomysql import IntegrityError
 
 
 class MySQLPlaylistRepo(PlaylistRepoInterface):
@@ -21,15 +22,17 @@ class MySQLPlaylistRepo(PlaylistRepoInterface):
                         result_dict[key] = result[i]
                     return Playlist.model_validate(result_dict)
                 return None
-
-    async def save(self, playlist: Playlist) -> None:
+    
+    async def save(self, playlist: Playlist):
         async with await self.pool.get_connection() as conn:
             async with conn.cursor() as cursor:
-                await cursor.execute(
-                    '''INSERT INTO playlists (name, user_id, is_public, description) VALUES (%s, %s, %s, %s)''',
-                    (playlist.name, playlist.user_id, playlist.is_public, playlist.description)
-                )
-
+                try:
+                    await cursor.execute(
+                        '''INSERT INTO playlists (id, name, user_id, is_public, description) VALUES (%s, %s, %s, %s, %s)''',
+                        (playlist.id, playlist.name, playlist.user_id, playlist.is_public, playlist.description)
+                    )
+                except IntegrityError:
+                    return True
                 await conn.commit()
 
     async def update(self, playlist: Playlist) -> None:

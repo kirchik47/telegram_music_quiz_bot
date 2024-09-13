@@ -3,7 +3,7 @@ from typing import Optional
 
 
 class Playlist(BaseModel):
-    id: int
+    id: str
     name: Optional[str] = None
     user_id: Optional[str] = None
     is_public: Optional[bool] = None

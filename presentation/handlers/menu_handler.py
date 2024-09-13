@@ -12,7 +12,7 @@ logger = logging.getLogger('handlers')
 
 @main_router.callback_query(F.data=='menu')
 @error_handler
-async def menu(callback, state, **kwargs):
+async def menu(callback, **kwargs):
     user_id = str(callback.from_user.id)
     username = callback.from_user.username
 
@@ -22,6 +22,6 @@ async def menu(callback, state, **kwargs):
         user_id, 
         text=MENU_MSG,
         reply_markup=kb.main,
-        parse_mode=ParseMode('MarkdownV2')
+        parse_mode=ParseMode('MarkdownV2') # For bold and italic type font
     )
     

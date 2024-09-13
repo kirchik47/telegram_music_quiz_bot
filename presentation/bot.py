@@ -17,14 +17,15 @@ from routers import (main_router, router_add_song, router_create_playlist, route
 from aiogram import Bot, Dispatcher
 from config.main_config import TG_TOKEN
 import asyncio
-from config import logging_config
-import handlers
+from config import logging_config # Importing config to apply it
+import handlers # Importing handlers module to register them in dispatcher
 
 
 bot = Bot(TG_TOKEN)
 dp = Dispatcher()
 
 async def main():
+    # Creating repo instances and passing them to service for middleware utilization
     sql_pool = MySQLPool(host=DB_HOST, port=DB_PORT, user=DB_USER, password=DB_PASSWORD, db=DB_NAME)
     redis_pool = RedisPool(host=REDIS_HOST, port=REDIS_PORT, db=0)
     await sql_pool.create_pool()
@@ -54,13 +55,11 @@ async def main():
 
     routers = [router_add_song, router_search, router_create_playlist, router_delete_playlist,
             router_delete_song, router_quiz, router_get, router_edit]
-
-    for router in routers:
-        router.message.middleware(repo_middleware)
-
-    main_router.message.middleware(repo_middleware)
+    
     main_router.include_routers(*routers)
-
+    
+    dp.message.middleware(repo_middleware)
+    dp.callback_query.middleware(repo_middleware)
     dp.include_routers(main_router)
     await dp.start_polling(bot)
 

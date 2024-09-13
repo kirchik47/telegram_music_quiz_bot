@@ -2,16 +2,18 @@ import logging
 from presentation.utils import error_handler
 import presentation.keyboards as kb 
 from aiogram.enums import ParseMode
+from aiogram.fsm.context import FSMContext
 from presentation.utils import get_instruction
 from aiogram import F
 from routers import main_router
+from aiogram.types import CallbackQuery
 
 
 logger = logging.getLogger('handlers')
 
 @main_router.callback_query(F.data=='instruction')
 @error_handler
-async def instruction(callback, state, **kwargs):
+async def instruction(callback: CallbackQuery, state: FSMContext, **kwargs):
     user_id = str(callback.from_user.id)
     username = callback.from_user.username
 
@@ -21,7 +23,7 @@ async def instruction(callback, state, **kwargs):
     await callback.bot.send_message(
         user_id, 
         text=instruction,
-        reply_markup=await kb.inline_lists([], [], ''),
-        parse_mode=ParseMode('MarkdownV2')
+        reply_markup=await kb.inline_lists([], [], ''), # Making inline keyboard only with one button 'Back to menu'
+        parse_mode=ParseMode('MarkdownV2') # For bold and italic type font
     )
     
