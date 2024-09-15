@@ -5,6 +5,7 @@ from infrastructure.repositories.playlist.sql_repo import MySQLPlaylistRepo
 from infrastructure.repositories.playlist.redis_repo import RedisPlaylistRepo
 from infrastructure.repositories.song.sql_repo import MySQLSongRepo
 from infrastructure.repositories.song.redis_repo import RedisSongRepo
+from infrastructure.repositories.song.s3_repo import S3SongRepo
 from infrastructure.repositories.quiz.redis_repo import RedisQuizRepo
 from infrastructure.aiomysql_config import MySQLPool
 from infrastructure.redis_config import RedisPool
@@ -15,7 +16,7 @@ from routers import (main_router, router_add_song, router_create_playlist, route
                      router_delete_playlist, router_quiz, router_get, router_search, router_edit_playlist)
 
 from aiogram import Bot, Dispatcher
-from config.main_config import TG_TOKEN
+from config.main_config import TG_TOKEN, BUCKET_NAME
 import asyncio
 from config import logging_config # Importing config to apply it
 import handlers # Importing handlers module to register them in dispatcher
@@ -32,7 +33,7 @@ async def main():
     await redis_pool.create_pool()
     sql_song_repo = MySQLSongRepo(sql_pool)
     redis_song_repo = RedisSongRepo(redis_pool)
-
+    s3_song_repo = S3SongRepo(bucket_name=BUCKET_NAME)
     sql_playlist_repo = MySQLPlaylistRepo(sql_pool, sql_song_repo)
     redis_playlist_repo = RedisPlaylistRepo(redis_pool)
 
@@ -49,7 +50,8 @@ async def main():
         redis_user_repo=redis_user_repo,
         redis_playlist_repo=redis_playlist_repo,
         redis_song_repo=redis_song_repo,
-        redis_quiz_repo=redis_quiz_repo
+        redis_quiz_repo=redis_quiz_repo,
+        s3_song_repo=s3_song_repo
         )
 
     repo_middleware = RepoMiddleware(repo_service)

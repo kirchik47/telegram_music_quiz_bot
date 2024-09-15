@@ -11,7 +11,8 @@ class RedisPlaylistRepo(PlaylistRepoInterface):
         async with await self.redis_pool.get_connection() as conn:
             data = await conn.get(f'playlist:{playlist.id}')
             print(data)
-            return Playlist.model_validate_json(data)
+            if data:
+                return Playlist.model_validate_json(data)
 
     async def save(self, playlist: Playlist) -> None:
         async with await self.redis_pool.get_connection() as conn:

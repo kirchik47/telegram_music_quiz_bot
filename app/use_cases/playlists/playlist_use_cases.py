@@ -22,7 +22,10 @@ class PlaylistUseCases:
         redis_info = await self.redis_repo.get(playlist)
         if redis_info:
             return redis_info
-        return await self.sql_repo.get(playlist)
+        playlist = await self.sql_repo.get(playlist)
+        await self.redis_repo.save(playlist)
+        return playlist
+
     
     async def update(self, playlist: Playlist) -> None:
         await self.sql_repo.update(playlist)

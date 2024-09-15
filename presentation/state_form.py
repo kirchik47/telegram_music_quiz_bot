@@ -2,7 +2,7 @@ from aiogram.filters.state import State, StatesGroup
 
 
 class Form(StatesGroup):
-    waiting_for_song_id = State()
+    waiting_for_song_url = State()
     waiting_for_playlist_name = State()
     menu = State()
     got_amount = State()

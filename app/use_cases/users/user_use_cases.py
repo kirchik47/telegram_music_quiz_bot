@@ -30,7 +30,9 @@ class UserUseCases:
         redis_info = await self.redis_repo.get(user)
         if redis_info:
             return redis_info
-        return await self.sql_repo.get(user)
+        user = await self.sql_repo.get(user)
+        await self.redis_repo.save(user)
+        return user
 
     async def update_playlists(self, user: User) -> None:
         await self.redis_repo.save(user)

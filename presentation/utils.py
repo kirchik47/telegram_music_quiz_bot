@@ -21,15 +21,8 @@ sp = Spotify(auth_manager=SpotifyClientCredentials(client_id=CLIENT_ID, client_s
 # Fetches preview url of the song and its name
 async def get_song_preview_url(song_id):
     track_info = sp.track(song_id)
-    print(track_info['artists'])
     artists = ", ".join([artist['name'] for artist in track_info['artists']])
-    return track_info['preview_url'], artists + " - " + track_info['name']
-
-# Downloads preview to the folder
-async def download_preview(url, filename):
-    response = requests.get(url)
-    async with aiofiles.open(filename, 'wb') as file:
-        await file.write(response.content)
+    return track_info.get('preview_url'), artists + " - " + track_info['name']
 
 # Extracts from spotify url id of the song
 async def extract_spotify_track_id(url):
@@ -38,10 +31,6 @@ async def extract_spotify_track_id(url):
         return match.group(1)
     else:
         return None
-
-# Generate unique token id for quiz
-async def generate_unique_token():
-    return secrets.token_hex(32)
 
 # Gets instruction from .txt file
 async def get_instruction():

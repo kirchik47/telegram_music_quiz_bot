@@ -55,7 +55,7 @@ class MySQLPlaylistRepo(PlaylistRepoInterface):
                                      (playlist.name, playlist.user_id))
                 await conn.commit()
 
-    async def get_by_user(self, user: User) -> tuple:
+    async def get_by_user(self, user: User) -> list:
         async with await self.pool.get_connection() as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute("SELECT * FROM playlists WHERE user_id=%s", (user.id,))

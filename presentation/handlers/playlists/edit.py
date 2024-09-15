@@ -15,7 +15,7 @@ from presentation.state_form import Form
 
 logger = logging.getLogger('handlers')
 
-async def update_playlist(state, repo_service, user_id):
+async def update_playlist(state: FSMContext, repo_service: RepoService, user_id: str):
     playlist_data = await state.get_data()
     playlist_id = playlist_data['id']
     playlist_name = playlist_data['name']

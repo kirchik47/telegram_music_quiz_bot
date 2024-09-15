@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 from typing import Optional
+from app.domain.entities.song import Song
 
 
 class Playlist(BaseModel):
@@ -8,7 +9,7 @@ class Playlist(BaseModel):
     user_id: Optional[str] = None
     is_public: Optional[bool] = None
     description: Optional[str] = None
-    songs: Optional[list[str]] = None
+    songs: Optional[list[Song]] = None
 
 
     def update(self, field, value):
