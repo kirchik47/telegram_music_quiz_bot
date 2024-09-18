@@ -55,19 +55,32 @@ async def finalize_playlist_deletion(callback: CallbackQuery, state: FSMContext,
     logger.info("DELETING PLAYLIST", extra={'user': username})
 
     # Extract the playlist ID from the callback data
-    playlist_id = " ".join(callback.data.split()[0])
+    playlist_id = callback.data.split()[0]
 
     # Getting repos from the service from the middleware
     sql_playlist_repo = repo_service.sql_playlist_repo
     redis_playlist_repo = repo_service.redis_playlist_repo
     
+    sql_user_repo = repo_service.sql_user_repo
+    redis_user_repo = repo_service.redis_user_repo
+
+    user_use_cases = UserUseCases(sql_repo=sql_user_repo, redis_repo=redis_user_repo)
     playlist_use_cases = PlaylistUseCases(sql_repo=sql_playlist_repo, redis_repo=redis_playlist_repo)
     playlist = Playlist(id=playlist_id)
+    user = await user_use_cases.get(User(id=user_id))
+    # Removing the playlist from cached user playlists
+
+    for playlist in user.playlists:
+        if playlist.id == playlist_id:
+            user.playlists.remove(playlist)
+        break
 
     # Fetching full info for future weaviate & elastic search integration
     playlist = await playlist_use_cases.get(playlist)
 
     await playlist_use_cases.delete(playlist)
+    # Updating cached playlists
+    await user_use_cases.update_playlists(user)
 
     await callback.bot.send_message(
         user_id,

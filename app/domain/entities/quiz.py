@@ -11,7 +11,3 @@ class Quiz(BaseModel):
     questions_left: Optional[int] = None
     max_points: Optional[int] = None
     inviters_info: Optional[list] = None
-    
-    def update(self, field, value):
-        if hasattr(self, field):
-            setattr(self, field, value)

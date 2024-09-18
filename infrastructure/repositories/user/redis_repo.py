@@ -13,7 +13,8 @@ class RedisUserRepo(UserRepoInterface):
             data = await conn.get(f'user:{user.id}')
             if data:
                 data = User.model_validate_json(data)
-                data.playlists = [Playlist.model_validate(playlist) for playlist in data.playlists]
+                if data.playlists:
+                    data.playlists = [Playlist.model_validate(playlist) for playlist in data.playlists]
                 return data
             return None
 

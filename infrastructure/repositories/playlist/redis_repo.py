@@ -1,6 +1,7 @@
 from infrastructure.redis_config import RedisPool
 from app.domain.repositories_interfaces.playlist_repo import PlaylistRepoInterface 
 from app.domain.entities.playlist import Playlist
+from app.domain.entities.song import Song
 
 
 class RedisPlaylistRepo(PlaylistRepoInterface):
@@ -10,9 +11,11 @@ class RedisPlaylistRepo(PlaylistRepoInterface):
     async def get(self, playlist: Playlist) -> dict:
         async with await self.redis_pool.get_connection() as conn:
             data = await conn.get(f'playlist:{playlist.id}')
-            print(data)
             if data:
-                return Playlist.model_validate_json(data)
+                data = Playlist.model_validate_json(data)
+                if data.songs:
+                    data.songs = [Song.model_validate(song) for song in data.songs]
+                return data
 
     async def save(self, playlist: Playlist) -> None:
         async with await self.redis_pool.get_connection() as conn:

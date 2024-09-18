@@ -1,10 +1,3 @@
-import requests
-import re
-import json
-from spotipy import Spotify, SpotifyClientCredentials
-import os
-from redis.asyncio import Redis
-import secrets
 import aiofiles
 import logging
 import hashlib
@@ -13,24 +6,6 @@ import presentation.keyboards as kb
 
 
 logger = logging.getLogger('utils')
-
-CLIENT_ID = os.getenv('SPOTIFY_CLIENT_ID')
-CLIENT_SECRET = os.getenv('SPOTIFY_CLIENT_SECRET')
-sp = Spotify(auth_manager=SpotifyClientCredentials(client_id=CLIENT_ID, client_secret=CLIENT_SECRET))
-
-# Fetches preview url of the song and its name
-async def get_song_preview_url(song_id):
-    track_info = sp.track(song_id)
-    artists = ", ".join([artist['name'] for artist in track_info['artists']])
-    return track_info.get('preview_url'), artists + " - " + track_info['name']
-
-# Extracts from spotify url id of the song
-async def extract_spotify_track_id(url):
-    match = re.search(r'https://open\.spotify\.com/track/([a-zA-Z0-9]+)', url)
-    if match:
-        return match.group(1)
-    else:
-        return None
 
 # Gets instruction from .txt file
 async def get_instruction():

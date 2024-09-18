@@ -3,15 +3,15 @@ from abc import ABC, abstractmethod
 
 class QuizRepoInterface(ABC):
     @abstractmethod
-    def get(self, quiz: Quiz) -> Quiz:
+    async def get(self, quiz: Quiz) -> Quiz:
         raise NotImplementedError
     
     @abstractmethod
-    def save(self, quiz: Quiz) -> Quiz:
+    async def save(self, quiz: Quiz) -> Quiz:
         raise NotImplementedError
     
     @abstractmethod
-    def delete(self, quiz: Quiz) -> Quiz:
+    async def delete(self, quiz: Quiz) -> Quiz:
         raise NotImplementedError
     
     

@@ -12,15 +12,16 @@ from app.use_cases.users.user_use_cases import UserUseCases
 from app.use_cases.playlists.playlist_use_cases import PlaylistUseCases
 from app.use_cases.songs.song_use_cases import SongUseCases
 from presentation.state_form import Form
-from presentation.utils import extract_spotify_track_id, get_song_preview_url, error_handler
+from presentation.utils import error_handler
 from aiomysql import IntegrityError
+from presentation.messages import PREVIEW_NOT_AVAILABLE_MSG, SONG_EXISTS_MSG
 
 
 logger = logging.getLogger('handlers')
 
 @router_add_song.callback_query(F.data=='choose_playlist_add_song')
 @error_handler
-async def ask_for_song_id(callback: CallbackQuery, state: FSMContext, repo_service: RepoService, **kwargs):
+async def choose_playlist_add_song(callback: CallbackQuery, state: FSMContext, repo_service: RepoService, **kwargs):
     user_id = str(callback.from_user.id)
     username = callback.from_user.username
 
@@ -54,7 +55,7 @@ async def ask_for_song_id(callback: CallbackQuery, state: FSMContext, repo_servi
 
 @router_add_song.callback_query(F.data.endswith(' add_song_spotify_url'))
 @error_handler
-async def got_playlist(callback: CallbackQuery, state: FSMContext, **kwargs):
+async def add_song_spotify_url(callback: CallbackQuery, state: FSMContext, **kwargs):
     playlist_id = callback.data.split()[0]
     user_id = str(callback.from_user.id)
 
@@ -78,7 +79,6 @@ async def add_song_to_playlist(message: Message, state: FSMContext, repo_service
     logger.info("ADD SONG TO PLAYLIST", extra={'user': username})
 
     try:
-        song_id = await extract_spotify_track_id(message.text.strip())
         playlist_data = await state.get_data()
         playlist_id = playlist_data['playlist_id']
 
@@ -88,32 +88,32 @@ async def add_song_to_playlist(message: Message, state: FSMContext, repo_service
         sql_song_repo = repo_service.sql_song_repo
         redis_song_repo = repo_service.redis_song_repo
         s3_song_repo = repo_service.s3_song_repo
+        spotify_service = repo_service.spotify_service
 
         playlist_use_cases = PlaylistUseCases(sql_repo=sql_playlist_repo, redis_repo=redis_playlist_repo)
-        playlist_name = (await playlist_use_cases.get(Playlist(id=playlist_id))).name
-        song_use_cases = SongUseCases(sql_repo=sql_song_repo, redis_repo=redis_song_repo, s3_repo=s3_song_repo)
+        song_use_cases = SongUseCases(sql_repo=sql_song_repo, redis_repo=redis_song_repo, 
+                                      s3_repo=s3_song_repo, spotify_service=spotify_service)
         
-        song_id = await extract_spotify_track_id(message.text)
-        print(song_id)
-        preview_url, song_title = await get_song_preview_url(song_id=song_id)
-        if preview_url:
-            song = Song(id=song_id, title=song_title, playlist_id=playlist_id)
-            await song_use_cases.add(song, preview_url)
+        song = await song_use_cases.add(url=message.text.strip(), playlist_id=playlist_id)
+        if song:
+            song_title = song.title
 
+            playlist = (await playlist_use_cases.get(Playlist(id=playlist_id)))
+            await playlist_use_cases.add_song(playlist, song)
             await message.bot.send_message(
                 user_id,
-                f'Song "{song_title}" has been added to playlist "{playlist_name}".',
+                f'Song "{song_title}" has been added to playlist "{playlist.name}".',
                 reply_markup=await kb.inline_lists([], [], 'menu')
             )
             await state.clear()
         else:
             await message.bot.send_message(
                 user_id, 
-                text='Preview is not available for this track.',
+                text=PREVIEW_NOT_AVAILABLE_MSG,
                 reply_markup=await kb.inline_lists([], [], ''))
     
-    except TypeError as e:
-        await message.answer("Invalid Spotify link. Please provide a valid song link:")
-    
     except IntegrityError:
-        await message.answer("This song is already in the playlist. Please provide a different song url:")
+        await message.bot.send_message(
+            user_id, 
+            text=SONG_EXISTS_MSG)
+

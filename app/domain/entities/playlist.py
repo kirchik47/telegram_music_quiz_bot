@@ -10,9 +10,3 @@ class Playlist(BaseModel):
     is_public: Optional[bool] = None
     description: Optional[str] = None
     songs: Optional[list[Song]] = None
-
-
-    def update(self, field, value):
-        if hasattr(self, field):
-            setattr(self, field, value)
-    

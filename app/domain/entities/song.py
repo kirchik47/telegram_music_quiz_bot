@@ -7,7 +7,3 @@ class Song(BaseModel):
     title: Optional[str] = None
     playlist_id: str
     
-    def update(self, field, value):
-        if hasattr(self, field):
-            setattr(self, field, value)
-    

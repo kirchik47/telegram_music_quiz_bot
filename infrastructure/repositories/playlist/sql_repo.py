@@ -1,4 +1,3 @@
-# infrastructure/repositories/mysql_playlist_repo.py
 from app.domain.repositories_interfaces.playlist_repo import PlaylistRepoInterface
 from app.domain.entities.playlist import Playlist
 from app.domain.entities.user import User

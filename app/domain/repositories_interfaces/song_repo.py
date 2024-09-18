@@ -4,15 +4,15 @@ from abc import ABC, abstractmethod
 
 class SongRepoInterface(ABC):
     @abstractmethod
-    def get(self, song: Song) -> Song:
+    async def get(self, song: Song) -> Song:
         raise NotImplementedError
     
     @abstractmethod
-    def save(self, song: Song) -> None:
+    async def save(self, song: Song) -> None:
         raise NotImplementedError
     
     @abstractmethod
-    def delete(self, song: Song) -> None:
+    async def delete(self, song: Song) -> None:
         raise NotImplementedError
     
     

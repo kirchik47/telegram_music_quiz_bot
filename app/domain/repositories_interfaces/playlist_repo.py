@@ -4,14 +4,14 @@ from abc import ABC, abstractmethod
 
 class PlaylistRepoInterface(ABC):
     @abstractmethod
-    def get(self, playlist: Playlist) -> Playlist:
+    async def get(self, playlist: Playlist) -> Playlist:
         raise NotImplementedError
     
     @abstractmethod
-    def save(self, playlist: Playlist) -> Playlist:
+    async def save(self, playlist: Playlist) -> Playlist:
         raise NotImplementedError
     
     @abstractmethod
-    def delete(self, playlist: Playlist) -> Playlist:
+    async def delete(self, playlist: Playlist) -> Playlist:
         raise NotImplementedError
     

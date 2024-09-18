@@ -1,5 +1,6 @@
 from app.domain.repositories_interfaces.playlist_repo import PlaylistRepoInterface
 from app.domain.entities.playlist import Playlist
+from app.domain.entities.song import Song
 
 
 class PlaylistUseCases:
@@ -29,4 +30,26 @@ class PlaylistUseCases:
     
     async def update(self, playlist: Playlist) -> None:
         await self.sql_repo.update(playlist)
+        await self.redis_repo.save(playlist)
+
+    async def add_song(self, playlist: Playlist, song: Song) -> None:
+        if playlist.songs:
+                playlist.songs.append(song)
+        else:
+            playlist.songs = [song]
+        
+        # If new song was added to playlist, update redis cache for it
+        await self.redis_repo.save(playlist)
+
+    async def delete_song(self, playlist: Playlist, song: Song) -> None:
+        song_id = song.id
+        print(song_id)
+        for song in playlist.songs:
+            print(song_id, song.id)
+            if song.id == song_id:
+                print("GOVNO")
+                playlist.songs.remove(song)
+                break
+        print(playlist)
+        # If new song was deleted from playlist, update redis cache for it
         await self.redis_repo.save(playlist)

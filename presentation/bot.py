@@ -7,13 +7,15 @@ from infrastructure.repositories.song.sql_repo import MySQLSongRepo
 from infrastructure.repositories.song.redis_repo import RedisSongRepo
 from infrastructure.repositories.song.s3_repo import S3SongRepo
 from infrastructure.repositories.quiz.redis_repo import RedisQuizRepo
+from infrastructure.services.spotify_service import SpotifyService
 from infrastructure.aiomysql_config import MySQLPool
 from infrastructure.redis_config import RedisPool
-from config.main_config import DB_HOST, DB_NAME, DB_USER, DB_PASSWORD, DB_PORT, REDIS_HOST, REDIS_PORT
+from config.main_config import (DB_HOST, DB_NAME, DB_USER, DB_PASSWORD, DB_PORT, 
+                                REDIS_HOST, REDIS_PORT, SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET)
 from middlewares.repo_middleware import RepoMiddleware
 from infrastructure.services.repo_service import RepoService
 from routers import (main_router, router_add_song, router_create_playlist, router_delete_song, 
-                     router_delete_playlist, router_quiz, router_get, router_search, router_edit_playlist)
+                     router_delete_playlist, router_quiz, router_get_songs, router_search, router_edit_playlist)
 
 from aiogram import Bot, Dispatcher
 from config.main_config import TG_TOKEN, BUCKET_NAME
@@ -31,18 +33,22 @@ async def main():
     redis_pool = RedisPool(host=REDIS_HOST, port=REDIS_PORT, db=0)
     await sql_pool.create_pool()
     await redis_pool.create_pool()
+
+    # Repos
     sql_song_repo = MySQLSongRepo(sql_pool)
     redis_song_repo = RedisSongRepo(redis_pool)
     s3_song_repo = S3SongRepo(bucket_name=BUCKET_NAME)
+    
     sql_playlist_repo = MySQLPlaylistRepo(sql_pool, sql_song_repo)
     redis_playlist_repo = RedisPlaylistRepo(redis_pool)
 
     sql_user_repo = MySQLUserRepo(sql_pool, sql_playlist_repo)
     redis_user_repo = RedisUserRepo(redis_pool)
-    
 
     redis_quiz_repo = RedisQuizRepo(redis_pool)
-
+    
+    # Services
+    spotify_service = SpotifyService(client_id=SPOTIFY_CLIENT_ID, client_secret=SPOTIFY_CLIENT_SECRET)
     repo_service = RepoService(
         sql_user_repo=sql_user_repo,
         sql_playlist_repo=sql_playlist_repo,
@@ -51,13 +57,14 @@ async def main():
         redis_playlist_repo=redis_playlist_repo,
         redis_song_repo=redis_song_repo,
         redis_quiz_repo=redis_quiz_repo,
-        s3_song_repo=s3_song_repo
+        s3_song_repo=s3_song_repo,
+        spotify_service=spotify_service
         )
 
     repo_middleware = RepoMiddleware(repo_service)
 
     routers = [router_add_song, router_search, router_create_playlist, router_delete_playlist,
-            router_delete_song, router_quiz, router_get, router_edit_playlist]
+            router_delete_song, router_quiz, router_get_songs, router_edit_playlist]
     
     main_router.include_routers(*routers)
     

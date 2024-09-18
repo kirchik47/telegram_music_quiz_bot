@@ -5,3 +5,5 @@ import presentation.handlers.playlists.create
 import presentation.handlers.playlists.delete 
 import presentation.handlers.playlists.edit
 import presentation.handlers.songs.add 
+import presentation.handlers.songs.delete
+import presentation.handlers.songs.get

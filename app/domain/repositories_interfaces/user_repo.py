@@ -3,14 +3,14 @@ from abc import ABC, abstractmethod
 
 class UserRepoInterface(ABC):
     @abstractmethod
-    def get(self, user: User) -> User:
+    async def get(self, user: User) -> User:
         raise NotImplementedError
 
     @abstractmethod
-    def save(self, user: User) -> None:
+    async def save(self, user: User) -> None:
         raise NotImplementedError
     
     @abstractmethod
-    def delete(self, user: User) -> None:
+    async def delete(self, user: User) -> None:
         raise NotImplementedError
     
