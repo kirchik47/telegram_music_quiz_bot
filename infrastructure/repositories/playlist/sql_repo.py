@@ -35,8 +35,9 @@ class MySQLPlaylistRepo(PlaylistRepoInterface):
                         (playlist.id, playlist.name, playlist.user_id, playlist.is_public, playlist.description)
                     )
                 except IntegrityError:
-                    return True
+                    return False
                 await conn.commit()
+                return True
 
     async def update(self, playlist: Playlist) -> None:
         async with await self.pool.get_connection() as conn:
