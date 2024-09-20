@@ -6,8 +6,6 @@ from routers import router_delete_playlist
 from presentation import keyboards as kb
 from presentation.utils import error_handler
 from infrastructure.services.repo_service import RepoService
-from app.domain.entities.user import User
-from app.domain.entities.playlist import Playlist
 from app.use_cases.users.user_use_cases import UserUseCases
 from app.use_cases.playlists.playlist_use_cases import PlaylistUseCases
 
@@ -24,9 +22,9 @@ async def choose_playlist_delete(callback: CallbackQuery, state: FSMContext, rep
 
     sql_user_repo = repo_service.sql_user_repo
     redis_user_repo =repo_service.redis_user_repo
-    user = User(id=user_id)
+
     user_use_cases = UserUseCases(sql_repo=sql_user_repo, redis_repo=redis_user_repo)
-    user = await user_use_cases.get(user)
+    user = await user_use_cases.get(user_id=user_id)
     playlists = user.playlists
     if not playlists:
         await callback.bot.send_message(
@@ -66,21 +64,15 @@ async def finalize_playlist_deletion(callback: CallbackQuery, state: FSMContext,
 
     user_use_cases = UserUseCases(sql_repo=sql_user_repo, redis_repo=redis_user_repo)
     playlist_use_cases = PlaylistUseCases(sql_repo=sql_playlist_repo, redis_repo=redis_playlist_repo)
-    playlist = Playlist(id=playlist_id)
-    user = await user_use_cases.get(User(id=user_id))
-    # Removing the playlist from cached user playlists
 
-    for playlist in user.playlists:
-        if playlist.id == playlist_id:
-            user.playlists.remove(playlist)
-        break
+    user = await user_use_cases.get(user_id=user_id)
 
     # Fetching full info for future weaviate & elastic search integration
     playlist = await playlist_use_cases.get(playlist)
 
     await playlist_use_cases.delete(playlist)
     # Updating cached playlists
-    await user_use_cases.update_playlists(user)
+    await user_use_cases.remove_playlists(user=user, playlist=playlist)
 
     await callback.bot.send_message(
         user_id,

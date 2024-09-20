@@ -87,12 +87,17 @@ async def finalize_playlist_creation(callback: CallbackQuery, state: FSMContext,
     redis_user_repo = repo_service.redis_user_repo
     # Generating 16 digit hash as playlist id
     playlist_id = await generate_playlist_id(playlist_name, user_id)
-
-    playlist = Playlist(id=playlist_id, name=playlist_name, user_id=user_id, is_public=visibility, description=description)
-    playlist_use_cases =  PlaylistUseCases(sql_repo=sql_playlist_repo, redis_repo=redis_playlist_repo)
     
+    playlist_use_cases =  PlaylistUseCases(sql_repo=sql_playlist_repo, redis_repo=redis_playlist_repo)
+
     # If returns True, playlist with this name was already present in the database, if None then not
-    res = await playlist_use_cases.create(playlist)
+    res = await playlist_use_cases.create(
+        playlist_id=playlist_id,
+        name=playlist_name,
+        user_id=user_id,
+        is_public=visibility,
+        description=description
+        )
     if res:
         await callback.bot.send_message(
             user_id,
@@ -100,18 +105,12 @@ async def finalize_playlist_creation(callback: CallbackQuery, state: FSMContext,
             reply_markup=await kb.inline_lists([], [], '')
         )
         return
+    playlist = await playlist_use_cases.get(playlist_id=playlist_id)
     
     user_use_cases = UserUseCases(sql_repo=sql_user_repo, redis_repo=redis_user_repo)
-    
-    user = User(id=user_id)
-    user = await user_use_cases.get(user)
+    user = await user_use_cases.get(user_id=user_id)
 
-    if user.playlists is None:
-        user.playlists = [playlist]
-    else:
-        user.playlists.append(playlist)
-    
-    await user_use_cases.update_playlists(user)
+    await user_use_cases.add_playlists(user=user, playlist=playlist)
     await state.clear()
     await callback.bot.send_message(
         user_id, 

@@ -5,9 +5,6 @@ import logging
 from routers import router_add_song
 from presentation import keyboards as kb
 from infrastructure.services.repo_service import RepoService
-from app.domain.entities.user import User
-from app.domain.entities.playlist import Playlist
-from app.domain.entities.song import Song
 from app.use_cases.users.user_use_cases import UserUseCases
 from app.use_cases.playlists.playlist_use_cases import PlaylistUseCases
 from app.use_cases.songs.song_use_cases import SongUseCases
@@ -29,10 +26,9 @@ async def choose_playlist_add_song(callback: CallbackQuery, state: FSMContext, r
 
     sql_user_repo = repo_service.sql_user_repo
     redis_user_repo = repo_service.redis_user_repo
-    user = User(id=user_id)
+
     user_use_cases = UserUseCases(sql_repo=sql_user_repo, redis_repo=redis_user_repo)
-    user = await user_use_cases.get(user)
-    print(user)
+    user = await user_use_cases.get(user_id)
     playlists = user.playlists
     
     if not playlists:
@@ -98,8 +94,8 @@ async def add_song_to_playlist(message: Message, state: FSMContext, repo_service
         if song:
             song_title = song.title
 
-            playlist = (await playlist_use_cases.get(Playlist(id=playlist_id)))
-            await playlist_use_cases.add_song(playlist, song)
+            playlist = await playlist_use_cases.get(playlist_id=playlist_id)
+            await playlist_use_cases.add_song(playlist_id, song)
             await message.bot.send_message(
                 user_id,
                 f'Song "{song_title}" has been added to playlist "{playlist.name}".',

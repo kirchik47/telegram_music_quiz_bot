@@ -6,8 +6,6 @@ from routers import router_edit_playlist
 from presentation import keyboards as kb
 from presentation.utils import error_handler
 from infrastructure.services.repo_service import RepoService
-from app.domain.entities.user import User
-from app.domain.entities.playlist import Playlist
 from app.use_cases.users.user_use_cases import UserUseCases
 from app.use_cases.playlists.playlist_use_cases import PlaylistUseCases
 from presentation.state_form import Form
@@ -21,15 +19,29 @@ async def update_playlist(state: FSMContext, repo_service: RepoService, user_id:
     playlist_name = playlist_data['name']
     playlist_description = playlist_data['description']
     visibility = playlist_data['visibility']
+    songs = playlist_data['songs']
     sql_playlist_repo = repo_service.sql_playlist_repo
     redis_playlist_repo = repo_service.redis_playlist_repo
+
+    sql_user_repo = repo_service.sql_user_repo
+    redis_user_repo = repo_service.redis_user_repo
+
     playlist_use_cases = PlaylistUseCases(sql_repo=sql_playlist_repo, redis_repo=redis_playlist_repo)
-    playlist = Playlist(id=playlist_id,
-                        name=playlist_name,
-                        user_id=user_id,
-                        is_public=visibility,
-                        description=playlist_description)
-    await playlist_use_cases.update(playlist)
+    user_use_cases = UserUseCases(sql_repo=sql_user_repo, redis_repo=redis_user_repo)
+
+    await playlist_use_cases.update(
+        playlist_id=playlist_id,
+        name=playlist_name,
+        user_id=user_id,
+        is_public=visibility,
+        description=playlist_description,
+        songs=songs
+    )
+    user = await user_use_cases.get(user_id=user_id)
+    playlist = await playlist_use_cases.get(playlist_id=playlist_id)
+    
+    await user_use_cases.update_playlist(user=user, playlist=playlist)
+
 
 @router_edit_playlist.callback_query(F.data == 'choose_playlist_edit')
 @error_handler
@@ -41,9 +53,8 @@ async def choose_playlist_delete(callback: CallbackQuery, state: FSMContext, rep
 
     sql_user_repo = repo_service.sql_user_repo
     redis_user_repo =repo_service.redis_user_repo
-    user = User(id=user_id)
     user_use_cases = UserUseCases(sql_repo=sql_user_repo, redis_repo=redis_user_repo)
-    user = await user_use_cases.get(user)
+    user = await user_use_cases.get(user_id=user_id)
     playlists = user.playlists
     if not playlists:
         await callback.bot.send_message(
@@ -76,12 +87,13 @@ async def edit_playlist_chosen(callback: CallbackQuery, state: FSMContext, repo_
     redis_playlist_repo = repo_service.redis_playlist_repo
     playlist_use_cases = PlaylistUseCases(sql_repo=sql_playlist_repo, redis_repo=redis_playlist_repo)
 
-    playlist = Playlist(id=playlist_id)
-    playlist = await playlist_use_cases.get(playlist)
+    playlist = await playlist_use_cases.get(playlist_id=playlist_id)
     playlist_name = playlist.name
     playlist_description = playlist.description
+    songs = playlist.songs
 
-    await state.update_data(id=playlist_id, name=playlist_name, description=playlist_description, visibility=playlist.is_public)
+    await state.update_data(id=playlist_id, name=playlist_name, description=playlist_description,
+                            visibility=playlist.is_public, songs=songs)
 
     visibility = 'public' if playlist.is_public else 'private'
 

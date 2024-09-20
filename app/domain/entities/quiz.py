@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 from typing import Optional
+from app.domain.entities.question import Question
 
 
 class Quiz(BaseModel):
@@ -11,3 +12,4 @@ class Quiz(BaseModel):
     questions_left: Optional[int] = None
     max_points: Optional[int] = None
     inviters_info: Optional[list] = None
+    questions: Optional[list[Question]] = None

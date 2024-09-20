@@ -5,8 +5,6 @@ import logging
 from routers import router_get_songs
 from presentation import keyboards as kb
 from infrastructure.services.repo_service import RepoService
-from app.domain.entities.user import User
-from app.domain.entities.playlist import Playlist
 from app.use_cases.users.user_use_cases import UserUseCases
 from app.use_cases.playlists.playlist_use_cases import PlaylistUseCases
 from presentation.utils import error_handler
@@ -24,9 +22,8 @@ async def choose_playlist_get_songs(callback: CallbackQuery, state: FSMContext, 
 
     sql_user_repo = repo_service.sql_user_repo
     redis_user_repo = repo_service.redis_user_repo
-    user = User(id=user_id)
     user_use_cases = UserUseCases(sql_repo=sql_user_repo, redis_repo=redis_user_repo)
-    user = await user_use_cases.get(user)
+    user = await user_use_cases.get(user_id=user_id)
     playlists = user.playlists
 
     if not playlists:
@@ -59,7 +56,7 @@ async def choose_song_get(callback: CallbackQuery, state: FSMContext, repo_servi
     redis_playlist_repo = repo_service.redis_playlist_repo
     playlist_use_cases = PlaylistUseCases(sql_repo=sql_playlist_repo, redis_repo=redis_playlist_repo)
     
-    playlist = await playlist_use_cases.get(Playlist(id=playlist_id))
+    playlist = await playlist_use_cases.get(playlist_id=playlist_id)
     songs = playlist.songs
 
     if not songs:

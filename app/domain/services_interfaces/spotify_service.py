@@ -7,3 +7,4 @@ class SpotifyServiceInterface(ABC):
 
     async def get_song_id(self, url: str):
         raise NotImplementedError
+    

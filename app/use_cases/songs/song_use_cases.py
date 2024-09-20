@@ -21,12 +21,14 @@ class SongUseCases:
             await self.redis_repo.save(song)
             return song
 
-    async def delete(self, song: Song) -> None:
+    async def delete(self, song_id: str, playlist_id: str) -> None:
+        song = Song(id=song_id, playlist_id=playlist_id)
         await self.sql_repo.delete(song)
         await self.redis_repo.delete(song)
 
-    async def get(self, song: Song) -> Song:
+    async def get(self, song_id: str, playlist_id: str) -> Song:
         # If song is in redis, return it from redis, otherwise from sql
+        song = Song(id=song_id, playlist_id=playlist_id)
         redis_info = await self.redis_repo.get(song)
         if redis_info:
             return redis_info
@@ -34,5 +36,6 @@ class SongUseCases:
         await self.redis_repo.save(song)
         return song
 
-    async def read_file(self, song: Song) -> bytes:
+    async def read_file(self, song_id: str, playlist_id: str, song_title: str) -> bytes:
+        song = Song(id=song_id, title=song_title, playlist_id=playlist_id)
         return await self.s3_repo.get(song)

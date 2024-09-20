@@ -1,13 +1,10 @@
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery
 from aiogram import F
 from aiogram.fsm.context import FSMContext
 import logging
 from routers import router_delete_song
 from presentation import keyboards as kb
 from infrastructure.services.repo_service import RepoService
-from app.domain.entities.user import User
-from app.domain.entities.playlist import Playlist
-from app.domain.entities.song import Song
 from app.use_cases.users.user_use_cases import UserUseCases
 from app.use_cases.playlists.playlist_use_cases import PlaylistUseCases
 from app.use_cases.songs.song_use_cases import SongUseCases
@@ -26,9 +23,8 @@ async def choose_playlist_delete_song(callback: CallbackQuery, state: FSMContext
 
     sql_user_repo = repo_service.sql_user_repo
     redis_user_repo = repo_service.redis_user_repo
-    user = User(id=user_id)
     user_use_cases = UserUseCases(sql_repo=sql_user_repo, redis_repo=redis_user_repo)
-    user = await user_use_cases.get(user)
+    user = await user_use_cases.get(user_id=user_id)
     playlists = user.playlists
 
     if not playlists:
@@ -62,7 +58,7 @@ async def choose_song_delete(callback: CallbackQuery, state: FSMContext, repo_se
     redis_playlist_repo = repo_service.redis_playlist_repo
     playlist_use_cases = PlaylistUseCases(sql_repo=sql_playlist_repo, redis_repo=redis_playlist_repo)
     
-    playlist = await playlist_use_cases.get(Playlist(id=playlist_id))
+    playlist = await playlist_use_cases.get(playlist_id=playlist_id)
     await state.update_data(playlist=playlist)
     songs = playlist.songs
 
@@ -105,10 +101,10 @@ async def delete_song(callback: CallbackQuery, state: FSMContext, repo_service: 
     
     song_use_cases = SongUseCases(sql_repo=sql_song_repo, redis_repo=redis_song_repo,
                                   s3_repo=s3_song_repo, spotify_service=spotify_service)
-    song = await song_use_cases.get(Song(id=song_id, playlist_id=(await state.get_data())['playlist_id']))
-    await song_use_cases.delete(song) 
+    song = await song_use_cases.get(song_id=song_id, playlist_id=(await state.get_data())['playlist_id'])
+    await song_use_cases.delete(song_id=song_id, playlist_id=playlist.id) 
     
-    await playlist_use_cases.delete_song(playlist, song)
+    await playlist_use_cases.delete_song(playlist_id=playlist.id, song=song)
     await callback.bot.send_message(
         user_id,
         f'Song "{song.title}" has been successfully deleted from the playlist.',
