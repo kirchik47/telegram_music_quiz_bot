@@ -15,6 +15,7 @@ class MySQLSongRepo(SongRepoInterface):
 
                 result = await cursor.fetchone()
                 if result:
+                    # Converting to dict for assign data to Song instance
                     keys = song.model_fields.keys()
                     result_dict = {}
                     for i, key in enumerate(keys):
@@ -44,8 +45,7 @@ class MySQLSongRepo(SongRepoInterface):
             async with conn.cursor() as cursor:
                 await cursor.execute("SELECT * FROM songs WHERE playlist_id=%s", (playlist.id,))
                 result = await cursor.fetchall()
-                print(result)
+                # Creating a list of Song instances with all metadata
                 return [Song(id=song[0],
                              title=song[1],
-                             playlist_id=song[2],
-                        ) for song in result]
+                             playlist_id=song[2]) for song in result]

@@ -13,14 +13,17 @@ class MySQLUserRepo(UserRepoInterface):
         async with await self.pool.get_connection() as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute("SELECT * FROM users WHERE id=%s", (user.id,))
+                 # Converting to list for appending
                 result = list(await cursor.fetchone())
+                # Appending playlists list with Playlist instances to the values of fields
                 result.append(await self.playlist_repo.get_by_user(user))
                 if result:
+                    # Converting result to dict for assigning its data to User for model validation
                     result_dict = {}
                     keys = user.model_fields.keys()
                     for i, key in enumerate(keys):
                         result_dict[key] = result[i]
-                    print(result_dict)
+                    # Setting values for Playlist instance fields
                     return User.model_validate(result_dict)
                 return None
 

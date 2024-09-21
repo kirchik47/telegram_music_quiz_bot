@@ -15,14 +15,17 @@ class MySQLPlaylistRepo(PlaylistRepoInterface):
         async with await self.pool.get_connection() as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute("SELECT * FROM playlists WHERE id=%s", (playlist.id, ))
+                # Converting to list for appending
                 result = list(await cursor.fetchone())
+                # Appending songs list with Song instances to the values of fields
                 result.append(await self.song_repo.get_by_playlist(playlist))
-                print(result)
                 if result:
+                    # Converting result to dict for assigning its data to Playlist for model validation
                     keys = playlist.model_fields.keys()
                     result_dict = {}
                     for i, key in enumerate(keys):
                         result_dict[key] = result[i]
+                    # Setting values for Playlist instance fields
                     return Playlist.model_validate(result_dict)
                 return None
     
@@ -34,6 +37,7 @@ class MySQLPlaylistRepo(PlaylistRepoInterface):
                         '''INSERT INTO playlists (id, name, user_id, is_public, description) VALUES (%s, %s, %s, %s, %s)''',
                         (playlist.id, playlist.name, playlist.user_id, playlist.is_public, playlist.description)
                     )
+                # Cathing the case when playlist is already present with this name in user's library
                 except IntegrityError:
                     return False
                 await conn.commit()
@@ -60,7 +64,7 @@ class MySQLPlaylistRepo(PlaylistRepoInterface):
             async with conn.cursor() as cursor:
                 await cursor.execute("SELECT * FROM playlists WHERE user_id=%s", (user.id,))
                 result = await cursor.fetchall()
-                print(result)
+                # Since result is tuple containing tuples with all fields, we need to convert it to list of Playlist instances
                 return [Playlist(id=playlist[0],
                                  name=playlist[1],
                                  user_id=playlist[2],

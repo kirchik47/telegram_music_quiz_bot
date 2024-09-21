@@ -1,3 +1,4 @@
+# Repository service that contains all repositories for SQL, redis, S3 and services.
 class RepoService:
     def __init__(self, sql_user_repo, sql_playlist_repo, sql_song_repo,
                  redis_user_repo, redis_playlist_repo, redis_song_repo, 

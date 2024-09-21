@@ -25,7 +25,7 @@ class MySQLPool:
         
     async def get_connection(self):
         return self.pool.acquire()
-
+    # If async with is not used
     async def release_connection(self, connection):
         self.pool.release(connection)
         

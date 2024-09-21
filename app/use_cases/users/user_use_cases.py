@@ -39,6 +39,7 @@ class UserUseCases:
         return user
 
     async def add_playlists(self, user: User, playlist: Playlist) -> None:
+        # Add playlist to user's playlists and save metadata in redis
         if user.playlists:
             user.playlists.append(playlist)
         else:
@@ -46,13 +47,16 @@ class UserUseCases:
         await self.redis_repo.save(user)
 
     async def remove_playlists(self, user: User, playlist: Playlist) -> None:
+        # Remove playlist from user's playlists and save the current list to redis
         user.playlists.remove(playlist)
         await self.redis_repo.save(user)
     
     async def update_playlist(self, user: User, playlist: Playlist) -> None:
+        # Update playlist in case of name, description or visibility changes
         user_playlists = user.playlists
         for i, cur_playlist in enumerate(user_playlists):
             if cur_playlist.id == playlist.id:
                 user_playlists[i] = playlist
                 break
+        # Save the updated playlist to redis
         await self.redis_repo.save(user)

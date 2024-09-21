@@ -14,12 +14,19 @@ logging_config = {
     'disable_existing_loggers': False,
     'formatters': {
         'standard': {
+            """
+            1. asctime - current time
+            2. name - logger name(e.g handlers, use cases)
+            3. levelname - name of logging level(e.g INFO, DEBUG, ERROR)
+            4. user - username of a user that triggered the log
+            5. message - log message
+            """
             'format': '%(asctime)s - %(name)s - %(levelname)s - %(user)s - %(message)s'
         },
     },
     'filters': {
         'user_filter': {
-            '()': UserFilter,
+            '()': UserFilter, 
         },
     },
     'handlers': {
@@ -61,7 +68,7 @@ logging_config = {
         '': {  
             'handlers': ['file', 'console'],
             'level': 'INFO',
-            'propagate': True,
+            'propagate': True, # For future if there will be different file for root logger, save all logs to it from other loggers
         }
     }
 }

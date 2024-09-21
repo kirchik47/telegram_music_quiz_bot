@@ -12,8 +12,11 @@ class SongUseCases:
         self.spotify_service = spotify_service
 
     async def add(self, url: str, playlist_id: str) -> Song:
+        # Retrieve song metadata and preview from Spotify
         song_id = await self.spotify_service.get_song_id(url=url)
         preview, song_title = await self.spotify_service.get_preview(song_id=song_id)
+
+        # If preview exists, save song in S3, SQL, and Redis
         if preview:
             song = Song(id=song_id, title=song_title, playlist_id=playlist_id)
             await self.s3_repo.save(song, preview)
@@ -22,12 +25,13 @@ class SongUseCases:
             return song
 
     async def delete(self, song_id: str, playlist_id: str) -> None:
+        # Remove song from both SQL and Redis
         song = Song(id=song_id, playlist_id=playlist_id)
         await self.sql_repo.delete(song)
         await self.redis_repo.delete(song)
 
     async def get(self, song_id: str, playlist_id: str) -> Song:
-        # If song is in redis, return it from redis, otherwise from sql
+        # Try to get the song from Redis; if not available, get it from SQL and update Redis
         song = Song(id=song_id, playlist_id=playlist_id)
         redis_info = await self.redis_repo.get(song)
         if redis_info:
@@ -37,5 +41,6 @@ class SongUseCases:
         return song
 
     async def read_file(self, song_id: str, playlist_id: str, song_title: str) -> bytes:
+        # Retrieve song preview file from S3
         song = Song(id=song_id, title=song_title, playlist_id=playlist_id)
         return await self.s3_repo.get(song)

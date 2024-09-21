@@ -11,9 +11,12 @@ class RedisUserRepo(UserRepoInterface):
     async def get(self, user: User) -> dict:
         async with await self.redis_pool.get_connection() as conn:
             data = await conn.get(f'user:{user.id}')
+            # If data is present in redis return it as User instance with metadata, otherwise return None
+            # and retrieve data from SQL
             if data:
                 data = User.model_validate_json(data)
                 if data.playlists:
+                    # Convert the list of playlist metadata as dicts to a list of Playlist instances
                     data.playlists = [Playlist.model_validate(playlist) for playlist in data.playlists]
                 return data
             return None
