@@ -16,7 +16,7 @@ from presentation.messages import PREVIEW_NOT_AVAILABLE_MSG, SONG_EXISTS_MSG
 
 logger = logging.getLogger('handlers')
 
-@router_add_song.callback_query(F.data=='choose_playlist_add_song')
+@router_add_song.callback_query(F.data == 'choose_playlist_add_song')
 @error_handler
 async def choose_playlist_add_song(callback: CallbackQuery, state: FSMContext, repo_service: RepoService, **kwargs):
     user_id = str(callback.from_user.id)
@@ -107,7 +107,7 @@ async def add_song_to_playlist(message: Message, state: FSMContext, repo_service
                 user_id, 
                 text=PREVIEW_NOT_AVAILABLE_MSG,
                 reply_markup=await kb.inline_lists([], [], ''))
-    
+    # Catch the case when song is already present in playlist
     except IntegrityError:
         await message.bot.send_message(
             user_id, 

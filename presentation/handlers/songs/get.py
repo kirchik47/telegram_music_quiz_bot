@@ -12,7 +12,7 @@ from presentation.utils import error_handler
 
 logger = logging.getLogger('handlers')
 
-@router_get_songs.callback_query(F.data=='choose_playlist_get_songs')
+@router_get_songs.callback_query(F.data == 'choose_playlist_get_songs')
 @error_handler
 async def choose_playlist_get_songs(callback: CallbackQuery, state: FSMContext, repo_service: RepoService, **kwargs):
     user_id = str(callback.from_user.id)
@@ -76,5 +76,4 @@ async def choose_song_get(callback: CallbackQuery, state: FSMContext, repo_servi
         user_id,
         text=reply,
         reply_markup=await kb.inline_lists([], [], '')
-
     )

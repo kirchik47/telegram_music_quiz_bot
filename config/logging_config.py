@@ -14,13 +14,13 @@ logging_config = {
     'disable_existing_loggers': False,
     'formatters': {
         'standard': {
-            """
-            1. asctime - current time
-            2. name - logger name(e.g handlers, use cases)
-            3. levelname - name of logging level(e.g INFO, DEBUG, ERROR)
-            4. user - username of a user that triggered the log
-            5. message - log message
-            """
+            
+            # 1. asctime - current time
+            # 2. name - logger name(e.g handlers, use cases)
+            # 3. levelname - name of logging level(e.g INFO, DEBUG, ERROR)
+            # 4. user - username of a user that triggered the log
+            # 5. message - log message
+
             'format': '%(asctime)s - %(name)s - %(levelname)s - %(user)s - %(message)s'
         },
     },

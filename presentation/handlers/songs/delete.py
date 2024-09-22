@@ -13,7 +13,7 @@ from presentation.utils import error_handler
 
 logger = logging.getLogger('handlers')
 
-@router_delete_song.callback_query(F.data=='choose_playlist_delete_song')
+@router_delete_song.callback_query(F.data == 'choose_playlist_delete_song')
 @error_handler
 async def choose_playlist_delete_song(callback: CallbackQuery, state: FSMContext, repo_service: RepoService, **kwargs):
     user_id = str(callback.from_user.id)
@@ -35,6 +35,7 @@ async def choose_playlist_delete_song(callback: CallbackQuery, state: FSMContext
         )
         return
 
+    # Prepare names and ids
     playlists_names = [playlist.name for playlist in playlists]
     playlists_ids = [playlist.id for playlist in playlists]
 

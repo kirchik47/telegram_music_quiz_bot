@@ -10,7 +10,7 @@ from routers import main_router
 
 logger = logging.getLogger('handlers')
 
-@main_router.callback_query(F.data=='menu')
+@main_router.callback_query(F.data == 'menu')
 @error_handler
 async def menu(callback, **kwargs):
     user_id = str(callback.from_user.id)

@@ -11,7 +11,7 @@ from aiogram.types import CallbackQuery
 
 logger = logging.getLogger('handlers')
 
-@main_router.callback_query(F.data=='instruction')
+@main_router.callback_query(F.data == 'instruction')
 @error_handler
 async def instruction(callback: CallbackQuery, state: FSMContext, **kwargs):
     user_id = str(callback.from_user.id)

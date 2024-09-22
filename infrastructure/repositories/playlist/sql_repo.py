@@ -32,14 +32,10 @@ class MySQLPlaylistRepo(PlaylistRepoInterface):
     async def save(self, playlist: Playlist):
         async with await self.pool.get_connection() as conn:
             async with conn.cursor() as cursor:
-                try:
-                    await cursor.execute(
-                        '''INSERT INTO playlists (id, name, user_id, is_public, description) VALUES (%s, %s, %s, %s, %s)''',
-                        (playlist.id, playlist.name, playlist.user_id, playlist.is_public, playlist.description)
-                    )
-                # Cathing the case when playlist is already present with this name in user's library
-                except IntegrityError:
-                    return False
+                await cursor.execute(
+                    '''INSERT INTO playlists (id, name, user_id, is_public, description) VALUES (%s, %s, %s, %s, %s)''',
+                    (playlist.id, playlist.name, playlist.user_id, playlist.is_public, playlist.description)
+                )
                 await conn.commit()
                 return True
 

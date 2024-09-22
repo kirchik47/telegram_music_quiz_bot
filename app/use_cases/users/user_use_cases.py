@@ -46,10 +46,14 @@ class UserUseCases:
             user.playlists = [playlist]
         await self.redis_repo.save(user)
 
-    async def remove_playlists(self, user: User, playlist: Playlist) -> None:
+    async def remove_playlists(self, user: User, playlist_id: str) -> None:
         # Remove playlist from user's playlists and save the current list to redis
-        user.playlists.remove(playlist)
+        for i, playlist in enumerate(user.playlists):
+            if playlist.id == playlist_id:
+                user.playlists.pop(i)
+                break
         await self.redis_repo.save(user)
+        return playlist
     
     async def update_playlist(self, user: User, playlist: Playlist) -> None:
         # Update playlist in case of name, description or visibility changes

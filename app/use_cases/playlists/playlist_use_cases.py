@@ -17,12 +17,13 @@ class PlaylistUseCases:
             description=description)
         
         # Save playlist in SQL repository
-        is_saved = await self.sql_repo.save(playlist)
-        if not is_saved:
-            return is_saved
+        await self.sql_repo.save(playlist)
         
         # If playlist is saved in SQL repo, save it in Redis cache
         await self.redis_repo.save(playlist)
+        
+        # Return playlist for future processing in handler
+        return playlist
 
     async def delete(self, playlist_id: str) -> None:
         # Delete playlist from both SQL and Redis repositories
@@ -42,7 +43,7 @@ class PlaylistUseCases:
         await self.redis_repo.save(playlist)
         return playlist
     
-    async def update(self, playlist_id: str, name: str, user_id: str, is_public: bool, description: str, songs: list) -> None:
+    async def update(self, playlist_id: str, name: str, user_id: str, is_public: bool, description: str, songs: list) -> Playlist:
         # Update playlist details including name, description, and list of songs
         playlist = Playlist(
             id=playlist_id,
@@ -57,6 +58,9 @@ class PlaylistUseCases:
         await self.sql_repo.update(playlist)
         await self.redis_repo.save(playlist)
 
+        # Returning Playlist instance in case it's needed for further processing in handler
+        return playlist
+
     async def add_song(self, playlist_id: str, song: Song) -> None:
         # Fetch the playlist and append the new song
         playlist = await self.get(playlist_id=playlist_id)
@@ -67,10 +71,12 @@ class PlaylistUseCases:
         
         # Update Redis cache with the modified playlist. 
         # We don't need to update SQL repo here because by adding single song, we already assign playlist id to it in db
-
         await self.redis_repo.save(playlist)
 
-    async def delete_song(self, playlist_id: str, song: Song) -> None:
+        # Return playlist in case of further processing in handler
+        return playlist
+
+    async def delete_song(self, playlist_id: str, song: Song) -> Playlist:
         # Fetch the playlist and remove the song by matching song ID
         playlist = await self.get(playlist_id=playlist_id)
         song_id = song.id
@@ -81,3 +87,6 @@ class PlaylistUseCases:
         
         # Update Redis cache with the modified playlist after the song has been deleted
         await self.redis_repo.save(playlist)
+        
+        # Return playlist in case of futher processing in handler
+        return playlist

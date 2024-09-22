@@ -35,5 +35,5 @@ async def generate_quiz_id(playlist_name, user_id):
     return f"{hashlib.sha256(raw_string.encode()).hexdigest()[:16]}" 
 
 async def generate_playlist_id(playlist_name, user_id):
-    raw_string = f"{playlist_name}{user_id}{time.time()}" # Adding current time to generate unique id and prevent collision
+    raw_string = f"{playlist_name}{user_id}" 
     return f"{hashlib.sha256(raw_string.encode()).hexdigest()[:16]}" 

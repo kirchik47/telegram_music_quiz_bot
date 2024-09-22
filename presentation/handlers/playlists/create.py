@@ -11,11 +11,12 @@ from infrastructure.services.repo_service import RepoService
 from app.domain.entities.playlist import Playlist
 from app.domain.entities.user import User
 from presentation.utils import generate_playlist_id, error_handler
+from aiomysql import IntegrityError
 
 
 logger = logging.getLogger('handlers')
 
-@router_create_playlist.callback_query(F.data=='create_playlist')
+@router_create_playlist.callback_query(F.data == 'create_playlist')
 @error_handler
 async def create_playlist(callback: CallbackQuery, state: FSMContext, **kwargs):
     user_id = str(callback.from_user.id)
@@ -87,18 +88,18 @@ async def finalize_playlist_creation(callback: CallbackQuery, state: FSMContext,
     redis_user_repo = repo_service.redis_user_repo
     # Generating 16 digit hash as playlist id
     playlist_id = await generate_playlist_id(playlist_name, user_id)
-    
+    print(playlist_id)
     playlist_use_cases =  PlaylistUseCases(sql_repo=sql_playlist_repo, redis_repo=redis_playlist_repo)
 
-    # If returns True, playlist with this name was already present in the database, if None then not
-    res = await playlist_use_cases.create(
-        playlist_id=playlist_id,
-        name=playlist_name,
-        user_id=user_id,
-        is_public=visibility,
-        description=description
-        )
-    if res:
+    try:
+        await playlist_use_cases.create(
+            playlist_id=playlist_id,
+            name=playlist_name,
+            user_id=user_id,
+            is_public=visibility,
+            description=description
+            )
+    except IntegrityError:
         await callback.bot.send_message(
             user_id,
             text='Playlist with this name already exists. Please try creating playlist with different name.',

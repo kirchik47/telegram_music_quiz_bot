@@ -14,6 +14,8 @@ from presentation.state_form import Form
 logger = logging.getLogger('handlers')
 
 async def update_playlist(state: FSMContext, repo_service: RepoService, user_id: str):
+    # Get full data of playlist from the state
+    # We are using state in order to not call get method of Playlist repo several times
     playlist_data = await state.get_data()
     playlist_id = playlist_data['id']
     playlist_name = playlist_data['name']
@@ -29,7 +31,7 @@ async def update_playlist(state: FSMContext, repo_service: RepoService, user_id:
     playlist_use_cases = PlaylistUseCases(sql_repo=sql_playlist_repo, redis_repo=redis_playlist_repo)
     user_use_cases = UserUseCases(sql_repo=sql_user_repo, redis_repo=redis_user_repo)
 
-    await playlist_use_cases.update(
+    playlist = await playlist_use_cases.update(
         playlist_id=playlist_id,
         name=playlist_name,
         user_id=user_id,
@@ -38,7 +40,6 @@ async def update_playlist(state: FSMContext, repo_service: RepoService, user_id:
         songs=songs
     )
     user = await user_use_cases.get(user_id=user_id)
-    playlist = await playlist_use_cases.get(playlist_id=playlist_id)
     
     await user_use_cases.update_playlist(user=user, playlist=playlist)
 
@@ -92,6 +93,7 @@ async def edit_playlist_chosen(callback: CallbackQuery, state: FSMContext, repo_
     playlist_description = playlist.description
     songs = playlist.songs
 
+    # Saving data to state to not call get method of playlist_use_cases several times
     await state.update_data(id=playlist_id, name=playlist_name, description=playlist_description,
                             visibility=playlist.is_public, songs=songs)
 
