@@ -31,7 +31,7 @@ async def start(message, repo_service: RepoService, **kwargs):
         redis_repo=redis_user_repo
         )
     # It either saves user or does nothing if he is already present there
-    await user_management_uc.save_user(user)
+    await user_management_uc.save_user(user_id, username)
     
     instruction = await get_instruction()
     

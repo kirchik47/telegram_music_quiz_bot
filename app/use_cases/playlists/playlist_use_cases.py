@@ -9,6 +9,16 @@ class PlaylistUseCases:
         self.redis_repo = redis_repo
     
     async def create(self, playlist_id: str, name: str, user_id: str, is_public: bool, description: str) -> bool:
+        """
+        Creates a new playlist and saves it to both SQL and Redis repositories.
+
+        :param playlist_id: The unique identifier for the playlist.
+        :param name: The name of the playlist.
+        :param user_id: The ID of the user creating the playlist.
+        :param is_public: Boolean indicating if the playlist is public.
+        :param description: A brief description of the playlist.
+        :return: True if the playlist is created successfully.
+        """
         playlist = Playlist(
             id=playlist_id,
             name=name,
@@ -26,12 +36,24 @@ class PlaylistUseCases:
         return playlist
 
     async def delete(self, playlist_id: str) -> None:
+        """
+        Deletes a playlist from both SQL and Redis repositories.
+
+        :param playlist_id: The unique identifier of the playlist to delete.
+        """
         # Delete playlist from both SQL and Redis repositories
         playlist = Playlist(id=playlist_id)
         await self.sql_repo.delete(playlist)
         await self.redis_repo.delete(playlist)
 
     async def get(self, playlist_id: str) -> Playlist:
+        """
+        Retrieves a playlist by its ID. It first checks Redis cache and 
+        falls back to SQL if not found.
+
+        :param playlist_id: The unique identifier for the playlist.
+        :return: The retrieved Playlist object.
+        """
         # Attempt to retrieve the playlist from Redis cache
         playlist = Playlist(id=playlist_id)
         redis_info = await self.redis_repo.get(playlist)
@@ -44,6 +66,18 @@ class PlaylistUseCases:
         return playlist
     
     async def update(self, playlist_id: str, name: str, user_id: str, is_public: bool, description: str, songs: list) -> Playlist:
+        """
+        Updates the details of an existing playlist including its name, 
+        description, visibility and list of songs.
+
+        :param playlist_id: The unique identifier of the playlist to update.
+        :param name: The new name for the playlist.
+        :param user_id: The ID of the user who owns the playlist.
+        :param is_public: Boolean indicating if the playlist is public.
+        :param description: The updated description of the playlist.
+        :param songs: The updated list of songs for the playlist.
+        :return: The updated Playlist object.
+        """
         # Update playlist details including name, description, and list of songs
         playlist = Playlist(
             id=playlist_id,
@@ -62,6 +96,12 @@ class PlaylistUseCases:
         return playlist
 
     async def add_song(self, playlist_id: str, song: Song) -> None:
+        """
+        Adds a new song to an existing playlist.
+
+        :param playlist_id: The unique identifier of the playlist to add the song to.
+        :param song: The Song object to add to the playlist.
+        """
         # Fetch the playlist and append the new song
         playlist = await self.get(playlist_id=playlist_id)
         if playlist.songs:
@@ -77,6 +117,13 @@ class PlaylistUseCases:
         return playlist
 
     async def delete_song(self, playlist_id: str, song: Song) -> Playlist:
+        """
+        Deletes a song from an existing playlist by matching the song ID.
+
+        :param playlist_id: The unique identifier of the playlist to delete the song from.
+        :param song: The Song object to delete from the playlist.
+        :return: The updated Playlist object after the song is deleted.
+        """
         # Fetch the playlist and remove the song by matching song ID
         playlist = await self.get(playlist_id=playlist_id)
         song_id = song.id
@@ -88,5 +135,5 @@ class PlaylistUseCases:
         # Update Redis cache with the modified playlist after the song has been deleted
         await self.redis_repo.save(playlist)
         
-        # Return playlist in case of futher processing in handler
+        # Return playlist in case of further processing in handler
         return playlist

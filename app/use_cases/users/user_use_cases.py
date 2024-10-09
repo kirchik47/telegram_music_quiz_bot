@@ -9,6 +9,15 @@ class UserUseCases:
         self.redis_repo = redis_repo
 
     async def save_user(self, user_id: str, username: str) -> None:
+        """
+        Saves a user to the database and cache.
+
+        This method checks if the user exists in Redis. If found, it updates the username if it differs.
+        If the user is not found in Redis, it checks the SQL database and saves or updates the user accordingly.
+
+        :param user_id: The unique identifier for the user.
+        :param username: The username of the user.
+        """
         user = User(id=user_id, username=username)
         # Check if the user exists in the redis cache
         redis_info = await self.redis_repo.get(user)
@@ -28,7 +37,16 @@ class UserUseCases:
             # Anyways save the user in redis cache because he is not present there
             await self.redis_repo.save(user)
     
-    async def get(self, user_id: str) ->  User:
+    async def get(self, user_id: str) -> User:
+        """
+        Retrieves a user by ID.
+
+        This method first checks the Redis cache for the user. If not found, it retrieves the user from
+        the SQL database and saves it to the cache.
+
+        :param user_id: The unique identifier for the user.
+        :return: The retrieved User object.
+        """
         # Check if the user exists in the redis cache
         user = User(id=user_id)
         redis_info = await self.redis_repo.get(user)
@@ -39,6 +57,14 @@ class UserUseCases:
         return user
 
     async def add_playlists(self, user: User, playlist: Playlist) -> None:
+        """
+        Adds a playlist to the user's playlists.
+
+        This method updates the user's playlists and saves the changes to Redis.
+
+        :param user: The User object to which the playlist will be added.
+        :param playlist: The Playlist object to be added to the user's playlists.
+        """
         # Add playlist to user's playlists and save metadata in redis
         if user.playlists:
             user.playlists.append(playlist)
@@ -47,15 +73,32 @@ class UserUseCases:
         await self.redis_repo.save(user)
 
     async def remove_playlists(self, user: User, playlist_id: str) -> None:
+        """
+        Removes a playlist from the user's playlists.
+
+        This method finds the playlist by ID, removes it from the user's playlists, and saves the updated
+        list to Redis.
+
+        :param user: The User object from which the playlist will be removed.
+        :param playlist_id: The ID of the Playlist to be removed.
+        """
         # Remove playlist from user's playlists and save the current list to redis
         for i, playlist in enumerate(user.playlists):
             if playlist.id == playlist_id:
                 user.playlists.pop(i)
                 break
         await self.redis_repo.save(user)
-        return playlist
     
     async def update_playlist(self, user: User, playlist: Playlist) -> None:
+        """
+        Updates a playlist in the user's playlists.
+
+        This method updates the playlist details such as name, description, or visibility, if changed,
+        and saves the updated playlists to Redis.
+
+        :param user: The User object whose playlist will be updated.
+        :param playlist: The updated Playlist object.
+        """
         # Update playlist in case of name, description or visibility changes
         user_playlists = user.playlists
         for i, cur_playlist in enumerate(user_playlists):

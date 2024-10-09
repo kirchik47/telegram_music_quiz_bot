@@ -8,6 +8,7 @@ from infrastructure.services.repo_service import RepoService
 from app.use_cases.users.user_use_cases import UserUseCases
 from app.use_cases.playlists.playlist_use_cases import PlaylistUseCases
 from presentation.utils import error_handler
+from presentation.messages import ABSENCE_OF_PLAYLISTS
 
 
 logger = logging.getLogger('handlers')
@@ -29,7 +30,7 @@ async def choose_playlist_get_songs(callback: CallbackQuery, state: FSMContext, 
     if not playlists:
         await callback.bot.send_message(
             user_id,
-            text="You don't have any playlists in your library, so you can't the list of songs. Please create a playlist first.",
+            text=ABSENCE_OF_PLAYLISTS,
             reply_markup=await kb.inline_lists([], [], 'menu')
         )
         return

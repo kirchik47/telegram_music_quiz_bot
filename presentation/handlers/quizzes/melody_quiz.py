@@ -1,148 +1,231 @@
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, BufferedInputFile
 from aiogram import F
 from aiogram.fsm.context import FSMContext
 import logging
+from routers import router_quiz
 from infrastructure.services.repo_service import RepoService
-from app.use_cases.quiz.melody_quiz_use_cases import MelodyQuizUseCases
+from app.use_cases.quizzes.melody_quiz_use_cases import QuizUseCases
+from app.use_cases.quizzes.facts_quiz_use_cases import FactsQuizUseCases
+from app.use_cases.users.user_use_cases import UserUseCases
+from app.use_cases.playlists.playlist_use_cases import PlaylistUseCases
+from app.use_cases.songs.song_use_cases import SongUseCases
 from presentation.state_form import Form
-from presentation.utils import error_handler
-from presentation.messages import INSUFFICIENT_SONGS_MSG, CHOOSE_PLAYLIST_MSG, QUIZ_STARTED_MSG, QUESTION_MSG
+from presentation.utils import error_handler, generate_quiz_id
+from presentation.messages import ABSENCE_OF_PLAYLISTS, INSUFFICIENT_SONGS
+import presentation.keyboards as kb
+from app.domain.entities.question import Question
+from app.domain.entities.quiz import Quiz
+import time
+
 
 logger = logging.getLogger('handlers')
 
-@router_quiz.callback_query(F.data.endswith('melody_quiz_amount'))
+@router_quiz.callback_query(F.data.endswith("quiz_choose_playlist"))
 @error_handler
-async def melody_quiz_amount(callback: CallbackQuery, state: FSMContext, repo_service: RepoService, **kwargs):
+async def quiz_choose_playlist(message: Message, state: FSMContext, repo_service: RepoService, **kwargs):
+    user_id = str(message.from_user.id)
+    logger.info("CHOOSING PLAYLIST FOR QUIZ", extra={'user': message.from_user.username})
+
+    sql_user_repo = repo_service.sql_user_repo
+    redis_user_repo = repo_service.redis_user_repo
+    user_use_cases = UserUseCases(sql_repo=sql_user_repo, redis_repo=redis_user_repo)
+
+    redis_quiz_repo = repo_service.redis_quiz_repo
+
+    playlists = (await user_use_cases.get(user_id=user_id)).playlists
+    
+    if not playlists:
+        raise ValueError(ABSENCE_OF_PLAYLISTS)
+    
+    playlists_names = [playlist.name for playlist in playlists]
+    playlists_ids = [playlist.id for playlist in playlists]
+
+    await message.bot.send_message(
+        user_id,
+        "Choose playlist to create a quiz based on it:",
+        reply_markup=await kb.inline_lists(playlists_names, playlists_ids, 'quiz_amount')
+    )
+
+@router_quiz.callback_query(F.data.endswith('quiz_amount'))
+@error_handler
+async def quiz_amount(callback: CallbackQuery, state: FSMContext, repo_service: RepoService, **kwargs):
     user_id = str(callback.from_user.id)
     username = callback.from_user.username
-    logger.info("CHOOSING MELODY QUIZ AMOUNT", extra={'user': username})
+    playlist_id = callback.data.split()[0]
+
+    logger.info("ENTERING QUIZ AMOUNT", extra={'user': username})
 
     sql_playlist_repo = repo_service.sql_playlist_repo
     redis_playlist_repo = repo_service.redis_playlist_repo
-    melody_quiz_use_cases = MelodyQuizUseCases(sql_repo=sql_playlist_repo, redis_repo=redis_playlist_repo)
-
-    max_amount = await melody_quiz_use_cases.get_max_question_count(user_id)
-    if not max_amount or max_amount < 4:
+    playlist_use_cases = PlaylistUseCases(sql_repo=sql_playlist_repo, redis_repo=redis_playlist_repo)
+    playlist = await playlist_use_cases.get(playlist_id=playlist_id)
+    songs_amount = len(playlist.songs)
+    if songs_amount < 4:
         await callback.bot.send_message(
             user_id,
-            text=INSUFFICIENT_SONGS_MSG,
-            reply_markup=await kb.inline_lists([], [], 'menu')
+            text=INSUFFICIENT_SONGS,
+            reply_markup=await kb.inline_lists([], [], '')
         )
         await state.clear()
         return
     
     await state.set_state(Form.got_amount)
+    await state.update_data(playlist=playlist)
     await callback.bot.send_message(
         user_id,
-        f"Enter the amount of questions (max {max_amount}):",
-        reply_markup=await kb.inline_lists([], [], 'menu')
+        f"Enter the amount of questions (max {songs_amount}):",
+        reply_markup=await kb.inline_lists([], [], '')
     )
+
 
 @router_quiz.message(Form.got_amount)
 @error_handler
-async def melody_quiz_playlist(message: Message, state: FSMContext, repo_service: RepoService, **kwargs):
+async def quiz_choose_type(message: Message, state: FSMContext, repo_service: RepoService, **kwargs):
+    questions_amount = int(message.text)
+    await state.update_data(amount=questions_amount)
+
     user_id = str(message.from_user.id)
-    logger.info("CHOOSING PLAYLIST FOR MELODY QUIZ", extra={'user': message.from_user.username})
-
-    sql_playlist_repo = repo_service.sql_playlist_repo
-    redis_playlist_repo = repo_service.redis_playlist_repo
-    melody_quiz_use_cases = MelodyQuizUseCases(sql_repo=sql_playlist_repo, redis_repo=redis_playlist_repo)
-
-    try:
-        questions_amount = int(message.text)
-        playlists = await melody_quiz_use_cases.get_eligible_playlists(user_id, questions_amount)
-        
-        if not playlists:
-            raise ValueError("No playlists with enough songs")
-        
-        playlists_names = [playlist.name for playlist in playlists]
-        playlists_ids = [playlist.id for playlist in playlists]
-
+    playlist = (await state.get_data())['playlist']
+    songs_amount = len(playlist.songs)
+    if questions_amount > songs_amount:
         await message.bot.send_message(
             user_id,
-            CHOOSE_PLAYLIST_MSG,
-            reply_markup=await kb.inline_lists(playlists_names, playlists_ids, 'melody_quiz_start')
+            text="Your playlist does not contain such amount of questions.",
+            reply_markup=await kb.inline_lists([], [], '')
         )
-        await state.update_data(questions_amount=questions_amount)
-        await state.clear()
-    except ValueError:
-        await message.bot.send_message(
-            user_id, f"None of your playlists have enough songs. Enter a number less than {questions_amount}:"
-        )
+        return
+    
+    username = message.from_user.username
+    logger.info("CHOOSE TYPE OF QUIZ", extra={'user': username})
 
-@router_quiz.callback_query(F.data.endswith('melody_quiz_start'))
+    await message.bot.send_message(
+        user_id,
+        text="Choose type of quiz:",
+        reply_markup=await kb.inline_lists(['Guess the song by 30 seconds preview', 
+                                            'Guess the song by the fact'], [0, 1], 'quiz')
+    )
+
+@router_quiz.callback_query(F.data.endswith('quiz'))
 @error_handler
 async def start_melody_quiz(callback: CallbackQuery, state: FSMContext, repo_service: RepoService, **kwargs):
+    quiz_type = callback.data.split()[0]
     user_id = str(callback.from_user.id)
-    username = callback.from_user.username
-    logger.info("STARTING MELODY QUIZ", extra={'user': username})
-
     data = await state.get_data()
-    questions_amount = data['questions_amount']
-    playlist_id = callback.data.split()[0]
+    playlist = data['playlist']
+    questions_amount = data['amount']
+    
+    username = callback.from_user.username
+    logger.info("STARTING QUIZ", extra={'user': username})
 
-    sql_playlist_repo = repo_service.sql_playlist_repo
-    redis_playlist_repo = repo_service.redis_playlist_repo
-    s3_song_repo = repo_service.s3_song_repo
+    redis_quiz_repo = repo_service.redis_quiz_repo
+    if  quiz_type == '0':
+        logger.debug("QUIZ USE CASES INIT", extra={'user': username})
+        quiz_use_cases = QuizUseCases(redis_repo=redis_quiz_repo)
+    else:
+        logger.debug("FACTS QUIZ USE CASES INIT", extra={'user': username})
+        quiz_use_cases = FactsQuizUseCases(redis_repo=redis_quiz_repo)
+    logger.debug("QUIZ USE CASES CREATE STARTED", extra={'user': username})
+    quiz = await quiz_use_cases.create(
+        quiz_id=await generate_quiz_id(playlist_name=playlist.name, user_id=user_id),
+        user_id=user_id,
+        points=0,
+        quiz_type=quiz_type,
+        max_points_per_question=60,
+        songs=playlist.songs,
+        questions_amount=questions_amount
+    )
+    await state.set_data({'quiz_id': quiz.id,
+                          'question_idx': 0})
 
-    melody_quiz_use_cases = MelodyQuizUseCases(sql_repo=sql_playlist_repo, redis_repo=redis_playlist_repo, s3_repo=s3_song_repo)
-
-    # Generate the quiz questions (select songs and shuffle for quiz)
-    quiz_questions = await melody_quiz_use_cases.generate_quiz(playlist_id, questions_amount)
-    await melody_quiz_use_cases.save_quiz_state(user_id, quiz_questions)
+    logger.debug("QUIZ USE CASES CREATE FINISHED", extra={'user': username})
+    
+    questions = quiz.questions
 
     # Send the first question
-    question = quiz_questions[0]
+    question = questions[0]
     await callback.bot.send_message(
         user_id,
-        QUIZ_STARTED_MSG,
-        reply_markup=await kb.inline_lists([], [], 'menu')
+        "🎉Quiz Started!🎉"
     )
     
-    await ask_melody_question(callback.bot, user_id, question, 1, questions_amount)
-    await state.set_state(Form.waiting_for_melody_answer)
+    await ask_melody_question(callback.bot, user_id, username, quiz, question, repo_service)
 
-@router_quiz.message(Form.waiting_for_melody_answer)
+@router_quiz.callback_query(F.data.endswith("quiz_continue"))
 @error_handler
-async def handle_melody_answer(message: Message, state: FSMContext, repo_service: RepoService, **kwargs):
-    user_id = str(message.from_user.id)
-    username = message.from_user.username
-    logger.info("HANDLING MELODY QUIZ ANSWER", extra={'user': username})
+async def handle_melody_answer(callback: CallbackQuery, state: FSMContext, repo_service: RepoService, **kwargs):
+    user_id = str(callback.from_user.id)
+    username = callback.from_user.username
+    state_data = await state.get_data()
+    quiz_id = state_data['quiz_id']
+    question_idx = state_data['question_idx']
+    logger.info("HANDLING QUIZ ANSWER", extra={'user': username})
 
-    melody_quiz_use_cases = MelodyQuizUseCases(redis_repo=repo_service.redis_playlist_repo)
+    redis_quiz_repo = repo_service.redis_quiz_repo
+    quiz_use_cases = QuizUseCases(redis_repo=redis_quiz_repo)
 
-    # Retrieve quiz state
-    quiz_data = await melody_quiz_use_cases.get_quiz_state(user_id)
-    current_question = quiz_data['current_question']
-    correct_answer = current_question['correct_answer']
-
+    quiz = await quiz_use_cases.get(quiz_id=quiz_id)
+    question = quiz.questions[question_idx]
+    correct_answer_idx = question.correct_answer_index
+    correct_answer = question.options[correct_answer_idx].title
+    quiz = await quiz_use_cases.add_points(quiz_id=quiz.id, question_id=question.id)
+    points = quiz.points
     # Check user's answer
-    if message.text.lower() == correct_answer.lower():
-        await message.bot.send_message(
-            user_id, "Correct! 🎉"
+    if callback.data.split()[0] == '1':
+        await callback.bot.send_message(
+            user_id, f"Correct! Your total score is {points}."
         )
     else:
-        await message.bot.send_message(
-            user_id, f"Wrong! The correct answer was {correct_answer}. 😔"
+        await callback.bot.send_message(
+            user_id, f"Wrong! The correct answer was {correct_answer}. You've got 0 points for this question😔"
         )
 
     # Move to the next question or finish
-    quiz_data['current_question_index'] += 1
-    if quiz_data['current_question_index'] < len(quiz_data['questions']):
-        next_question = quiz_data['questions'][quiz_data['current_question_index']]
-        await ask_melody_question(message.bot, user_id, next_question, quiz_data['current_question_index'] + 1, len(quiz_data['questions']))
-        await melody_quiz_use_cases.save_quiz_state(user_id, quiz_data)
+    if question_idx + 1 < len(quiz.questions):
+        await state.update_data({'question_idx': question_idx + 1})
+        next_question = quiz.questions[question_idx + 1]
+        await ask_melody_question(callback.bot, user_id, username, quiz, next_question, repo_service)
     else:
-        await message.bot.send_message(
-            user_id, "Quiz finished! 🎉"
+        await callback.bot.send_message(
+            user_id, 
+            f"Quiz finished! You've got {points} points!🎉🎉🎉",
+            reply_markup=await kb.inline_lists([], [], '')
         )
-        await melody_quiz_use_cases.delete_quiz_state(user_id)
+        await quiz_use_cases.delete(quiz.id)
         await state.clear()
 
 
-async def ask_melody_question(bot, user_id, question, question_number, total_questions):
+async def ask_melody_question(bot, user_id, username, quiz: Quiz, question: Question, repo_service: RepoService):
+    options = question.options
+    correct_answer_idx = question.correct_answer_index
+    correct_answer = options[correct_answer_idx]
+    
+    sql_song_repo = repo_service.sql_song_repo
+    redis_song_repo = repo_service.redis_song_repo
+    s3_song_repo = repo_service.s3_song_repo
+    spotify_service = repo_service.spotify_service
+    song_use_cases = SongUseCases(sql_repo=sql_song_repo, 
+                                  redis_repo=redis_song_repo, 
+                                  s3_repo=s3_song_repo,
+                                  spotify_service=spotify_service)
+    song_bytes = await song_use_cases.read_file(correct_answer.title)
+    logger.info("SONG FILE READ", extra={'user': username})
+
+    ids = [0] * 4
+    ids[correct_answer_idx] = 1
+    song_file = BufferedInputFile(song_bytes, filename='song.mp3')
+    question.start_time = time.time()
+    quiz_use_cases = QuizUseCases(redis_repo=repo_service.redis_quiz_repo)
+    await quiz_use_cases.save(quiz_id=quiz.id, 
+                              user_id=quiz.user_id,
+                              points=quiz.points,
+                              quiz_type=quiz.quiz_type,
+                              max_points_per_question=quiz.max_points_per_question,
+                              questions=quiz.questions)
     # Play song preview (from S3 bucket) for the melody quiz question
-    song_url = question['song_url']
-    await bot.send_audio(
-        user_id, song_url, caption=f"Question {question_number}/{total_questions}: What song is this?"
+    await bot.send_voice(
+        user_id, voice=song_file, caption=question.text,
+        reply_markup=await kb.inline_lists([options[0].title, 
+                                            options[1].title,
+                                            options[2].title,
+                                            options[3].title], ids, 'quiz_continue')
     )

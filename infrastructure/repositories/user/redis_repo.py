@@ -8,7 +8,7 @@ class RedisUserRepo(UserRepoInterface):
     def __init__(self, redis_pool: RedisPool):
         self.redis_pool = redis_pool
     
-    async def get(self, user: User) -> dict:
+    async def get(self, user: User) -> User:
         async with await self.redis_pool.get_connection() as conn:
             data = await conn.get(f'user:{user.id}')
             # If data is present in redis return it as User instance with metadata, otherwise return None

@@ -13,7 +13,7 @@ class S3SongRepo(SongRepoInterface):
     async def get(self, song: Song) -> bytes:
         async with self.s3_session.client('s3') as s3_client:
             response = await s3_client.get_object(Bucket=self.bucket_name, Key='songs/' + song.title + '.mp3')
-        return response['Body'].read()  # Returns the binary data of the song
+            return await response['Body'].read()  # Returns the binary data of the song
     
     async def save(self, song: Song, url) -> None:
         async with aiohttp.ClientSession() as session:

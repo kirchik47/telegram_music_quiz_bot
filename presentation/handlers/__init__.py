@@ -7,3 +7,4 @@ import presentation.handlers.playlists.edit
 import presentation.handlers.songs.add 
 import presentation.handlers.songs.delete
 import presentation.handlers.songs.get
+import presentation.handlers.quizzes.melody_quiz

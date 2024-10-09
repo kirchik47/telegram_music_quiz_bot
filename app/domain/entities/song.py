@@ -10,7 +10,7 @@ Other fields can be None because for some functionality we need only id(e.g get 
 3. playlist_id (str): Identifier of the playlist this song belongs to.
 """
 class Song(BaseModel):
-    id: str
+    id: Optional[str] = None
     title: Optional[str] = None
-    playlist_id: str
+    playlist_id: Optional[str] = None
     
