@@ -35,7 +35,11 @@ async def quiz_choose_playlist(message: Message, state: FSMContext, repo_service
     playlists = (await user_use_cases.get(user_id=user_id)).playlists
     
     if not playlists:
-        raise ValueError(ABSENCE_OF_PLAYLISTS)
+        await message.bot.send_message(
+            user_id, 
+            ABSENCE_OF_PLAYLISTS,
+            reply_markup=await kb.inline_lists([], [], ''))
+        return
     
     playlists_names = [playlist.name for playlist in playlists]
     playlists_ids = [playlist.id for playlist in playlists]
@@ -122,8 +126,12 @@ async def start_melody_quiz(callback: CallbackQuery, state: FSMContext, repo_ser
         logger.debug("QUIZ USE CASES INIT", extra={'user': username})
         quiz_use_cases = QuizUseCases(redis_repo=redis_quiz_repo)
     else:
+        aiohttp_service = repo_service.aiohttp_service
+        genius_service = repo_service.genius_service
         logger.debug("FACTS QUIZ USE CASES INIT", extra={'user': username})
-        quiz_use_cases = FactsQuizUseCases(redis_repo=redis_quiz_repo)
+        quiz_use_cases = FactsQuizUseCases(redis_repo=redis_quiz_repo,
+                                           aiohttp_service=aiohttp_service,
+                                           genius_service=genius_service)
     logger.debug("QUIZ USE CASES CREATE STARTED", extra={'user': username})
     quiz = await quiz_use_cases.create(
         quiz_id=await generate_quiz_id(playlist_name=playlist.name, user_id=user_id),
@@ -147,9 +155,11 @@ async def start_melody_quiz(callback: CallbackQuery, state: FSMContext, repo_ser
         user_id,
         "🎉Quiz Started!🎉"
     )
-    
-    await ask_melody_question(callback.bot, user_id, username, quiz, question, repo_service)
-
+    if quiz_type == '0':
+        await ask_melody_question(callback.bot, user_id, username, quiz, question, repo_service)
+    else:
+        await ask_facts_question(callback.bot, user_id, username, quiz, question, repo_service)
+        
 @router_quiz.callback_query(F.data.endswith("quiz_continue"))
 @error_handler
 async def handle_melody_answer(callback: CallbackQuery, state: FSMContext, repo_service: RepoService, **kwargs):
@@ -166,28 +176,36 @@ async def handle_melody_answer(callback: CallbackQuery, state: FSMContext, repo_
     quiz = await quiz_use_cases.get(quiz_id=quiz_id)
     question = quiz.questions[question_idx]
     correct_answer_idx = question.correct_answer_index
-    correct_answer = question.options[correct_answer_idx].title
-    quiz = await quiz_use_cases.add_points(quiz_id=quiz.id, question_id=question.id)
+    if quiz.quiz_type == '0':
+        correct_answer = question.options[correct_answer_idx].title
+    else:
+        correct_answer = question.options[correct_answer_idx]
     points = quiz.points
     # Check user's answer
     if callback.data.split()[0] == '1':
+        quiz = await quiz_use_cases.add_points(quiz_id=quiz.id, question_id=question.id)
+        points = quiz.points
         await callback.bot.send_message(
             user_id, f"Correct! Your total score is {points}."
         )
     else:
         await callback.bot.send_message(
-            user_id, f"Wrong! The correct answer was {correct_answer}. You've got 0 points for this question😔"
+            user_id, 
+            f'''Wrong! The correct answer was {correct_answer}. You've got 0 points for this question😔.\nYour total score is {points}.'''
         )
 
     # Move to the next question or finish
     if question_idx + 1 < len(quiz.questions):
         await state.update_data({'question_idx': question_idx + 1})
         next_question = quiz.questions[question_idx + 1]
-        await ask_melody_question(callback.bot, user_id, username, quiz, next_question, repo_service)
+        if quiz.quiz_type == '0':
+            await ask_melody_question(callback.bot, user_id, username, quiz, next_question, repo_service)
+        else:
+            await ask_facts_question(callback.bot, user_id, username, quiz, next_question, repo_service)
     else:
         await callback.bot.send_message(
             user_id, 
-            f"Quiz finished! You've got {points} points!🎉🎉🎉",
+            f"Quiz finished! You've got total score of {points}/{quiz.max_points_per_question * len(quiz.questions)} points!🎉🎉🎉",
             reply_markup=await kb.inline_lists([], [], '')
         )
         await quiz_use_cases.delete(quiz.id)
@@ -228,4 +246,27 @@ async def ask_melody_question(bot, user_id, username, quiz: Quiz, question: Ques
                                             options[1].title,
                                             options[2].title,
                                             options[3].title], ids, 'quiz_continue')
+    )
+
+async def ask_facts_question(bot, user_id, username, quiz: Quiz, question: Question, repo_service: RepoService):
+    options = question.options
+    correct_answer_idx = question.correct_answer_index
+    correct_answer = options[correct_answer_idx]
+    ids = [0] * 4
+    ids[correct_answer_idx] = 1
+    question.start_time = time.time()
+    quiz_use_cases = QuizUseCases(redis_repo=repo_service.redis_quiz_repo)
+    await quiz_use_cases.save(quiz_id=quiz.id, 
+                              user_id=quiz.user_id,
+                              points=quiz.points,
+                              quiz_type=quiz.quiz_type,
+                              max_points_per_question=quiz.max_points_per_question,
+                              questions=quiz.questions)
+    await bot.send_message(
+        user_id,
+        text=question.text,
+        reply_markup=await kb.inline_lists([options[0], 
+                                            options[1],
+                                            options[2],
+                                            options[3]], ids, 'quiz_continue')
     )

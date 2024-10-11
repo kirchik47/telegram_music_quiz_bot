@@ -19,8 +19,9 @@ class RedisQuizRepo(QuizRepoInterface):
                 if data.questions:
                     # Convert the list of questions metadata as dicts to a list of Question objects
                     data.questions = [Question.model_validate(question) for question in data.questions]
-                    for question in data.questions:
-                        question.options = [Song.model_validate(song) for song in question.options]
+                    if data.quiz_type == '0':
+                        for question in data.questions:
+                            question.options = [Song.model_validate(song) for song in question.options]
                     print(data)
                 return data
             return None

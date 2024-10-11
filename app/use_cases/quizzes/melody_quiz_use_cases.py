@@ -106,7 +106,7 @@ class QuizUseCases:
         quiz = Quiz(id=quiz_id)
         await self.redis_repo.delete(quiz=quiz)
 
-    async def add_points(self, quiz_id: str, question_id: str, max_time=30, decay_factor=1):
+    async def add_points(self, quiz_id: str, question_id: str, max_time=30, min_points=20, decay_factor=1):
         """
         Adds points to a quiz based on the time taken to answer a question.
 
@@ -115,12 +115,14 @@ class QuizUseCases:
         :param quiz_id: The unique identifier of the quiz to update.
         :param question_id: The ID of the question for which points are being added.
         :param max_time: The maximum allowed time for answering the question (default is 30 seconds).
+        :param min_points: The minimum amount of points secured by answering correctly (default is 20 points).
         :param decay_factor: The factor controlling how quickly points drop off with increasing time (default is 1).
         """
         quiz = await self.get(quiz_id=quiz_id)
         for question in quiz.questions:
             if question.id == question_id:
                 time_taken = (time.time() - question.start_time) 
-                quiz.points += int(quiz.max_points_per_question * ((max_time - time_taken) /  max_time)**decay_factor)
+                quiz.points += min_points + int((quiz.max_points_per_question - min_points) 
+                                                * ((max_time - min(time_taken, max_time)) /  max_time)**decay_factor)
         await self.redis_repo.save(quiz)
         return quiz # For future use

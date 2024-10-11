@@ -8,6 +8,8 @@ from infrastructure.repositories.song.redis_repo import RedisSongRepo
 from infrastructure.repositories.song.s3_repo import S3SongRepo
 from infrastructure.repositories.quiz.redis_repo import RedisQuizRepo
 from infrastructure.services.spotify_service import SpotifyService
+from infrastructure.services.aiohttp_service import AiohttpService
+from infrastructure.services.genius_service import GeniusService
 from infrastructure.aiomysql_config import MySQLPool
 from infrastructure.redis_config import RedisPool
 from config.main_config import (DB_HOST, DB_NAME, DB_USER, DB_PASSWORD, DB_PORT, 
@@ -49,6 +51,8 @@ async def main():
     
     # Services
     spotify_service = SpotifyService(client_id=SPOTIFY_CLIENT_ID, client_secret=SPOTIFY_CLIENT_SECRET)
+    aiohttp_service = AiohttpService()
+    genius_service = GeniusService(aiohttp_service=aiohttp_service)
     repo_service = RepoService(
         sql_user_repo=sql_user_repo,
         sql_playlist_repo=sql_playlist_repo,
@@ -58,7 +62,9 @@ async def main():
         redis_song_repo=redis_song_repo,
         redis_quiz_repo=redis_quiz_repo,
         s3_song_repo=s3_song_repo,
-        spotify_service=spotify_service
+        spotify_service=spotify_service,
+        aiohttp_service=aiohttp_service,
+        genius_service=genius_service
         )
 
     repo_middleware = RepoMiddleware(repo_service)

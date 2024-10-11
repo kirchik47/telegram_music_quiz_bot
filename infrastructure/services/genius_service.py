@@ -1,5 +1,4 @@
 from app.domain.services_interfaces.aiohttp_service import AiohttpServiceInterface
-import os
 from bs4 import BeautifulSoup
 from config.main_config import GENIUS_CLIENT_ACCESS_TOKEN
 
@@ -37,24 +36,16 @@ class GeniusService:
 
     async def get_lyrics(self, lyrics_url: str):
         lyrics_html = await self.aiohttp_service.get(lyrics_url)
-        soup = BeautifulSoup(lyrics_html, 'html.parser')
-        lyrics_spans = soup.findAll('span', class_='ReferentFragmentdesktop__Highlight-sc-110r0d9-1 jAzSMw')
-        lyrics_str = ""
-        for span in lyrics_spans:
-            for br in span.findAll('br'):
-                br.replace_with('\n')
-            lyrics_str += span.text + "\n"
+        soup = BeautifulSoup(await lyrics_html.text(), 'html.parser')
+        lyrics_div_list = soup.findAll('div', class_='Lyrics__Container-sc-1ynbvzw-1 kUgSbL')
+        lyrics_str = "\n".join([lyrics_div.get_text(separator="\n") for lyrics_div in lyrics_div_list])
         return lyrics_str
 
     async def retrieve_info(self, song_name: str):
-        try:
-            api_path = await self.search_song(song_name)
-            song_info = await self.get_song_info(api_path)
-            lyrics = await self.get_lyrics(song_info['lyrics_url'])
-            return {
-                'description': song_info['description'],
-                'lyrics': lyrics
-            }
-        except Exception as e:
-            print(f"Error retrieving song info: {e}")
-            return None
+        api_path = await self.search_song(song_name)
+        song_info = await self.get_song_info(api_path)
+        lyrics = await self.get_lyrics(song_info['lyrics_url'])
+        return {
+            'description': song_info['description'],
+            'lyrics': lyrics
+        }

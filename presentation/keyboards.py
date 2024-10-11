@@ -11,7 +11,6 @@ async def inline_lists(lst, ids, param, menu=True):
 
 main = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text='Start quiz', callback_data='quiz_choose_playlist')],
-    [InlineKeyboardButton(text='Start "Facts about song" quiz', callback_data='fsdfdgd')],
     [InlineKeyboardButton(text='Add song', callback_data='choose_playlist_add_song'), 
      InlineKeyboardButton(text='Delete song', callback_data='choose_playlist_delete_song')],
     [InlineKeyboardButton(text='Get songs list', callback_data='choose_playlist_get_songs'), 
